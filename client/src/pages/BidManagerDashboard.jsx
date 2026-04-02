@@ -224,10 +224,18 @@ export default function BidManagerDashboard() {
             <div className="modal-body">
               {expectedPayData ? (
                 <>
-                  <div className="pay-summary-grid" style={{ gridTemplateColumns: '1fr' }}>
-                    <div className="pay-summary-item pay-summary-total">
-                      <span className="pay-summary-label">Total expected</span>
+                  <div className="pay-summary-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                    <div className="pay-summary-item">
+                      <span className="pay-summary-label">Gross total</span>
                       <span className="pay-summary-value">${expectedPayData.total}</span>
+                    </div>
+                    <div className="pay-summary-item pay-summary-tax">
+                      <span className="pay-summary-label">Tax ({((expectedPayData.taxRate ?? 0.10) * 100).toFixed(0)}%)</span>
+                      <span className="pay-summary-value">−${expectedPayData.taxAmount ?? '0.00'}</span>
+                    </div>
+                    <div className="pay-summary-item pay-summary-total">
+                      <span className="pay-summary-label">Net expected</span>
+                      <span className="pay-summary-value">${expectedPayData.netPay ?? expectedPayData.total}</span>
                     </div>
                   </div>
                   <p className="card-subtitle" style={{ margin: '0.75rem 0' }}>

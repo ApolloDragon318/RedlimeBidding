@@ -145,9 +145,17 @@ export default function OpsLeadPaymentRequests() {
               <span className="pay-summary-label">Rate</span>
               <span className="pay-summary-value">${expectedOps.opsRate}</span>
             </div>
-            <div className="pay-summary-item pay-summary-total" style={{ border: '1px solid rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.08)' }}>
-              <span className="pay-summary-label">Base pay</span>
+            <div className="pay-summary-item">
+              <span className="pay-summary-label">Gross pay</span>
               <span className="pay-summary-value">${expectedOps.basePay}</span>
+            </div>
+            <div className="pay-summary-item pay-summary-tax">
+              <span className="pay-summary-label">Tax ({((expectedOps.taxRate ?? 0.10) * 100).toFixed(0)}%)</span>
+              <span className="pay-summary-value">−${expectedOps.taxAmount ?? '0.00'}</span>
+            </div>
+            <div className="pay-summary-item pay-summary-total" style={{ border: '1px solid rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.08)' }}>
+              <span className="pay-summary-label">Net pay</span>
+              <span className="pay-summary-value">${expectedOps.netPay ?? expectedOps.basePay}</span>
             </div>
           </div>
           <p className="card-subtitle" style={{ marginTop: '0.75rem' }}>

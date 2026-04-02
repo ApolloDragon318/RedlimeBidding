@@ -16,7 +16,9 @@ const LEVEL_OPTIONS = [
 ]
 
 export default function AdminDashboard() {
-  const [salaryConfigs, setSalaryConfigs] = useState([])
+  const [salaryGrid, setSalaryGrid] = useState({})
+  const [salaryRoles, setSalaryRoles] = useState([])
+  const [salaryLevels, setSalaryLevels] = useState([])
   const [pendingUsers, setPendingUsers] = useState([])
   const [opsLeads, setOpsLeads] = useState([])
   const [bidManagersList, setBidManagersList] = useState([])
@@ -28,6 +30,7 @@ export default function AdminDashboard() {
   const [personPayouts, setPersonPayouts] = useState([])
   const [legacyBatchPayouts, setLegacyBatchPayouts] = useState([])
   const [payoutTree, setPayoutTree] = useState([])
+  const [payoutTaxRate, setPayoutTaxRate] = useState(0.10)
   const [payoutRequests, setPayoutRequests] = useState([])
   const [adminBonusByUser, setAdminBonusByUser] = useState({})
   const [payConfirm, setPayConfirm] = useState(null)
@@ -65,6 +68,7 @@ export default function AdminDashboard() {
         api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } }))
       ])
       setPayoutTree(qRes.data.tree || [])
+      setPayoutTaxRate(qRes.data.taxRate ?? 0.10)
       setPayoutRequests(prRes.data?.requests || [])
     } catch (e) {
       console.error(e)
@@ -80,15 +84,17 @@ export default function AdminDashboard() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [configRes, pendingRes, historyRes, opsRes, bmRes, biddersRes] = await Promise.all([
-        api.get('/salary').catch(() => ({ data: [] })),
+      const [salaryRes, pendingRes, historyRes, opsRes, bmRes, biddersRes] = await Promise.all([
+        api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } })),
         api.get('/users/pending').catch(() => ({ data: [] })),
         api.get('/salary/history').catch(() => ({ data: { personPayouts: [], legacyBatchPayouts: [] } })),
         api.get('/users/ops-leads').catch(() => ({ data: [] })),
         api.get('/users/bid-managers').catch(() => ({ data: [] })),
         api.get('/users/bidders').catch(() => ({ data: [] }))
       ])
-      setSalaryConfigs(configRes.data || [])
+      setSalaryGrid(salaryRes.data?.grid || {})
+      setSalaryRoles(salaryRes.data?.roles || [])
+      setSalaryLevels(salaryRes.data?.levels || [])
       setPendingUsers(pendingRes.data)
       setPersonPayouts(historyRes.data?.personPayouts || [])
       setLegacyBatchPayouts(historyRes.data?.legacyBatchPayouts || [])
@@ -178,23 +184,16 @@ export default function AdminDashboard() {
 
   const formatLevel = (l) => l ? l.replace(/_/g, ' ') : '—'
 
-  const handleSaveConfig = async (bidManagerId, cfg) => {
+  const saveRate = async (role, level, rate) => {
     setSavingSalary(true)
     try {
-      await api.put(`/salary/${bidManagerId}`, { bidManagerSalaryPerProfile: Number(cfg.bidManagerSalaryPerProfile) })
-      await loadData()
+      const res = await api.put('/salary/rate', { role, level, rate: Number(rate) })
+      setSalaryGrid(res.data?.grid || {})
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to save')
     } finally {
       setSavingSalary(false)
     }
-  }
-
-  const updateConfigLocal = (bidManagerId, field, value) => {
-    const id = String(bidManagerId)
-    setSalaryConfigs(prev => prev.map(c =>
-      String(c.bidManagerId) === id ? { ...c, [field]: value } : c
-    ))
   }
 
   const assignOpsLead = async (bidManagerId, opsLeadId) => {
@@ -221,35 +220,9 @@ export default function AdminDashboard() {
     }
   }
 
-  const saveBidderSalary = async (bidderId, salaryPerBid) => {
-    setSavingSalary(true)
-    try {
-      await api.patch(`/users/${bidderId}/salary-per-bid`, { salaryPerBid: Number(salaryPerBid) })
-      await loadData()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to save salary')
-    } finally {
-      setSavingSalary(false)
-    }
-  }
-
-  const updateBidderLocal = (bidderId, salaryPerBid) => {
-    setBiddersList(prev => prev.map(b =>
-      b._id === bidderId ? { ...b, salaryPerBid } : b
-    ))
-  }
-
-  const saveOpsTeamRate = async (userId, rate) => {
-    setSavingSalary(true)
-    try {
-      await api.patch(`/users/${userId}/ops-team-rate`, { opsTeamRate: Number(rate) })
-      await loadData()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to save team rate')
-    } finally {
-      setSavingSalary(false)
-    }
-  }
+  const ROLE_LABELS = { bidder: 'Bidder', bid_manager: 'Bid Manager', ops_lead: 'Ops Lead' }
+  const LEVEL_LABELS = { junior: 'Junior', mid_level: 'Mid-level', senior: 'Senior', staff: 'Staff' }
+  const RATE_UNITS = { bidder: '$ / bid', bid_manager: '$ / profile', ops_lead: '$ / person' }
 
   const confirmPersonPay = async () => {
     if (!payConfirm) return
@@ -326,6 +299,7 @@ export default function AdminDashboard() {
               setBonusByUser={setAdminBonusByUser}
               onPay={user => setPayConfirm(user)}
               onRefresh={fetchPayoutQueue}
+              taxRate={payoutTaxRate}
             />
           </div>
         </>
@@ -649,7 +623,7 @@ export default function AdminDashboard() {
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
-                  <tr><th>Date</th><th>Name</th><th>Role</th><th>Base</th><th>Admin bonus</th><th>Total</th><th>Address</th><th>TxID</th></tr>
+                  <tr><th>Date</th><th>Name</th><th>Role</th><th>Base</th><th>Bonus</th><th>Gross</th><th>Tax</th><th>Net</th><th>TxID</th></tr>
                 </thead>
                 <tbody>
                   {personPayouts.map(h => (
@@ -659,8 +633,9 @@ export default function AdminDashboard() {
                       <td>{h.role?.replace(/_/g, ' ')}</td>
                       <td>${Number(h.basePay).toFixed(2)}</td>
                       <td>${Number(h.adminBonus).toFixed(2)}</td>
-                      <td><strong>${Number(h.totalPay).toFixed(2)}</strong></td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: '200px', wordBreak: 'break-all' }}>{h.walletAddress}</td>
+                      <td>${Number(h.totalPay).toFixed(2)}</td>
+                      <td className="text-muted">−${Number(h.taxAmount ?? 0).toFixed(2)}</td>
+                      <td><strong>${Number(h.netPay ?? h.totalPay).toFixed(2)}</strong></td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: '180px', wordBreak: 'break-all' }}>{h.txId || '—'}</td>
                     </tr>
                   ))}
@@ -697,132 +672,69 @@ export default function AdminDashboard() {
 
       {/* ── Salary Config ── */}
       {activeTab === 'salary' && (
-        <>
-          <div className="card">
-            <div className="card-header">
-              <h3>Ops Lead</h3>
-              <span className="badge badge-role badge-ops_lead">per-person rate</span>
-            </div>
-            <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
-              Ops pay = distinct bidders (people) &times; this rate. Admin bonus added at payout.
-            </p>
-            {opsLeads.length === 0 ? (
-              <p className="empty-state">No Ops Leads yet.</p>
-            ) : (
-              <div className="salary-card-list">
-                {opsLeads.map(ol => (
-                  <div key={ol._id} className="salary-card">
-                    <div className="salary-card-info">
-                      <span className="salary-card-name">{ol.name}</span>
-                      <span className="salary-card-detail">{ol.email}</span>
-                      {ol.usdtErc20Wallet && (
-                        <span className="salary-card-wallet">{ol.usdtErc20Wallet}</span>
-                      )}
-                    </div>
-                    <div className="salary-card-input">
-                      <label>$ / person</label>
-                      <input
-                        type="number" step="0.01" min="0"
-                        defaultValue={ol.opsTeamRate ?? 0}
-                        id={`salary-ops-rate-${ol._id}`}
-                        disabled={savingSalary}
-                      />
-                    </div>
-                    <button
-                      type="button" className="btn btn-primary btn-sm" disabled={savingSalary}
-                      onClick={() => {
-                        const el = document.getElementById(`salary-ops-rate-${ol._id}`)
-                        saveOpsTeamRate(ol._id, el?.value ?? 0)
-                      }}
-                    >Save</button>
-                  </div>
+        <div className="card">
+          <div className="card-header">
+            <h3>Salary rates</h3>
+            <span className="card-subtitle">Same role &amp; level = same rate. Changes apply to all future payouts.</span>
+          </div>
+          <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
+            <strong>Bidder:</strong> bid count &times; rate + BM bonus &nbsp;|&nbsp;
+            <strong>Bid Manager:</strong> profiles &times; rate + Ops bonus &nbsp;|&nbsp;
+            <strong>Ops Lead:</strong> people &times; rate
+          </p>
+
+          <div className="rate-grid-wrap">
+            <table className="rate-grid">
+              <thead>
+                <tr>
+                  <th className="rate-grid-corner">Role \ Level</th>
+                  {salaryLevels.map(l => (
+                    <th key={l}>{LEVEL_LABELS[l] || l}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {salaryRoles.map(role => (
+                  <tr key={role}>
+                    <td className="rate-grid-role">
+                      <span>{ROLE_LABELS[role] || role}</span>
+                      <span className="rate-grid-unit">{RATE_UNITS[role]}</span>
+                    </td>
+                    {salaryLevels.map(level => {
+                      const val = salaryGrid[role]?.[level] ?? 0
+                      return (
+                        <td key={level} className="rate-grid-cell">
+                          <input
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            defaultValue={val}
+                            key={`${role}-${level}-${val}`}
+                            className="rate-grid-input"
+                            disabled={savingSalary}
+                            onBlur={e => {
+                              const newVal = Number(e.target.value)
+                              if (newVal !== val) saveRate(role, level, newVal)
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.target.blur()
+                              }
+                            }}
+                          />
+                        </td>
+                      )
+                    })}
+                  </tr>
                 ))}
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
 
-          <div className="card">
-            <div className="card-header">
-              <h3>Bid managers</h3>
-              <span className="badge badge-role badge-bid_manager">per-profile rate</span>
-            </div>
-            <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
-              BM pay = confirmed profiles &times; this rate. Ops bonus added by Ops Lead at approval.
-            </p>
-            {salaryConfigs.length === 0 ? (
-              <p className="empty-state">No bid managers yet.</p>
-            ) : (
-              <div className="salary-card-list">
-                {salaryConfigs.map(cfg => (
-                  <div key={String(cfg.bidManagerId)} className="salary-card">
-                    <div className="salary-card-info">
-                      <span className="salary-card-name">{cfg.bidManager?.name || 'Bid Manager'}</span>
-                    </div>
-                    <div className="salary-card-input">
-                      <label>$ / profile / week</label>
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={cfg.bidManagerSalaryPerProfile}
-                        onChange={e => updateConfigLocal(String(cfg.bidManagerId), 'bidManagerSalaryPerProfile', e.target.value)}
-                        disabled={savingSalary}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSaveConfig(String(cfg.bidManagerId), cfg)}
-                      disabled={savingSalary}
-                      className="btn btn-primary btn-sm"
-                    >{savingSalary ? 'Saving...' : 'Save'}</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3>Bidders</h3>
-              <span className="badge badge-role badge-bidder">per-bid rate</span>
-            </div>
-            <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
-              Bidder pay = bid count &times; this rate. BM bonus added by Bid Manager at approval.
-            </p>
-            {biddersList.length === 0 ? (
-              <p className="empty-state">No bidders yet.</p>
-            ) : (
-              <div className="salary-card-list">
-                {biddersList.map(b => (
-                  <div key={b._id} className="salary-card">
-                    <div className="salary-card-info">
-                      <span className="salary-card-name">{b.name}</span>
-                      <span className="salary-card-detail">{b.email}</span>
-                      <span className="salary-card-detail">
-                        BM: {b.bidManagerId?.name || '—'}
-                      </span>
-                    </div>
-                    <div className="salary-card-input">
-                      <label>$ / bid</label>
-                      <input
-                        key={`salary-tab-spb-${b._id}-${b.salaryPerBid}`}
-                        type="number" step="0.001" min="0"
-                        defaultValue={b.salaryPerBid ?? 0.08}
-                        id={`salary-bidder-${b._id}`}
-                        disabled={savingSalary}
-                      />
-                    </div>
-                    <button
-                      type="button" className="btn btn-primary btn-sm" disabled={savingSalary}
-                      onClick={() => {
-                        const el = document.getElementById(`salary-bidder-${b._id}`)
-                        saveBidderSalary(b._id, el?.value)
-                      }}
-                    >Save</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
+          <p className="text-muted" style={{ fontSize: '0.8rem', marginTop: '0.75rem' }}>
+            Edit a cell and press Enter or click away to save. All employees with the same role &amp; level share the same rate.
+          </p>
+        </div>
       )}
 
       <PayConfirmModal
@@ -833,6 +745,7 @@ export default function AdminDashboard() {
         paying={paying}
         onConfirm={confirmPersonPay}
         onCancel={() => { setPayConfirm(null); setPayTxId('') }}
+        taxRate={payoutTaxRate}
       />
     </div>
   )

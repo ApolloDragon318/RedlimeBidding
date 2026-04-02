@@ -1223,6 +1223,16 @@
 .payout-value { font-weight: 600; }
 .payout-total { color: var(--accent); font-size: 1.05rem; }
 
+.payout-tax .payout-value {
+  color: var(--danger, #ef4444);
+  font-size: 0.85rem;
+}
+
+.payout-tax .payout-label {
+  color: var(--danger, #ef4444);
+  opacity: 0.8;
+}
+
 .payout-bonus-field {
   display: inline-flex;
   align-items: center;
@@ -1344,6 +1354,16 @@
 
 .pay-summary-value { font-size: 1.1rem; font-weight: 600; }
 .pay-summary-total .pay-summary-value { color: var(--accent); font-size: 1.3rem; }
+
+.pay-summary-tax {
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.pay-summary-tax .pay-summary-value {
+  color: var(--danger, #ef4444);
+  font-size: 1rem;
+}
 
 .pay-summary-role {
   font-size: 0.75rem;
@@ -1788,101 +1808,90 @@
   .assignment-wallet { max-width: 100%; }
 }
 
-/* ── Salary cards ── */
-.salary-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+/* ── Salary rate grid ── */
+.rate-grid-wrap {
+  overflow-x: auto;
 }
 
-.salary-card {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.15s;
+.rate-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
 }
 
-.salary-card:last-child { border-bottom: none; }
-.salary-card:hover { background: var(--surface-hover); }
-
-.salary-card-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+.rate-grid th,
+.rate-grid td {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  text-align: center;
 }
 
-.salary-card-name {
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.salary-card-detail {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.salary-card-wallet {
-  font-family: monospace;
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}
-
-.salary-card-input {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.salary-card-input label {
-  font-size: 0.7rem;
+.rate-grid thead th {
+  background: var(--surface-hover);
+  font-size: 0.78rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
-  white-space: nowrap;
 }
 
-.salary-card-input input {
-  width: 100px;
-  padding: 0.4rem 0.5rem;
+.rate-grid-corner {
+  text-align: left !important;
+  font-size: 0.72rem !important;
+  color: var(--text-muted) !important;
+  min-width: 140px;
+}
+
+.rate-grid-role {
+  text-align: left !important;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rate-grid-unit {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 0.1rem;
+}
+
+.rate-grid-cell {
+  padding: 0.4rem !important;
+}
+
+.rate-grid-input {
+  width: 100%;
+  max-width: 110px;
+  margin: 0 auto;
+  padding: 0.45rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
   font-size: 0.9rem;
+  text-align: center;
+  transition: border-color 0.15s;
 }
 
-.salary-card-input input:focus {
+.rate-grid-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
 }
 
 @media (max-width: 640px) {
-  .salary-card {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
+  .rate-grid th,
+  .rate-grid td {
+    padding: 0.5rem 0.4rem;
+    font-size: 0.8rem;
   }
-
-  .salary-card-input {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
+  .rate-grid-input {
+    max-width: 80px;
+    font-size: 0.82rem;
   }
-
-  .salary-card-input input { flex: 1; width: auto; }
 }
 
 /* ── Stats ── */

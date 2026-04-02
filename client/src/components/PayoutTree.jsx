@@ -1,10 +1,12 @@
 import { useState } from 'react'
 
-function PayRow({ user, bonusByUser, setBonusByUser, onPay, indent = 0 }) {
+function PayRow({ user, bonusByUser, setBonusByUser, onPay, taxRate = 0.10, indent = 0 }) {
   const key = String(user.userId)
   const raw = bonusByUser[key]
   const bonus = raw === undefined || raw === '' ? 0 : Number(raw)
   const total = (Number(user.basePay) || 0) + (Number.isNaN(bonus) ? 0 : bonus)
+  const tax = +(total * taxRate).toFixed(2)
+  const net = +(total - tax).toFixed(2)
 
   return (
     <div className={`payout-node payout-depth-${indent}`}>
@@ -31,7 +33,15 @@ function PayRow({ user, bonusByUser, setBonusByUser, onPay, indent = 0 }) {
           </div>
           <div className="payout-amounts">
             <span className="payout-label">Total</span>
-            <span className="payout-value payout-total">${total.toFixed(2)}</span>
+            <span className="payout-value">${total.toFixed(2)}</span>
+          </div>
+          <div className="payout-amounts payout-tax">
+            <span className="payout-label">Tax {(taxRate * 100).toFixed(0)}%</span>
+            <span className="payout-value">−${tax.toFixed(2)}</span>
+          </div>
+          <div className="payout-amounts">
+            <span className="payout-label">Net</span>
+            <span className="payout-value payout-total">${net.toFixed(2)}</span>
           </div>
           <button
             type="button"
@@ -53,7 +63,7 @@ function PayRow({ user, bonusByUser, setBonusByUser, onPay, indent = 0 }) {
   )
 }
 
-export default function PayoutTree({ tree, bonusByUser, setBonusByUser, onPay, onRefresh }) {
+export default function PayoutTree({ tree, bonusByUser, setBonusByUser, onPay, onRefresh, taxRate = 0.10 }) {
   const [collapsed, setCollapsed] = useState({})
   const toggle = key => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
 
@@ -78,7 +88,7 @@ export default function PayoutTree({ tree, bonusByUser, setBonusByUser, onPay, o
               <span className={`payout-chevron ${opsOpen ? 'open' : ''}`}>&#9662;</span>
             </button>
             <div className="payout-group-content">
-              <PayRow user={ops} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={0} />
+              <PayRow user={ops} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} taxRate={taxRate} indent={0} />
               {opsOpen && (ops.bidManagers || []).map(bm => {
                 const bmKey = String(bm.userId)
                 const bmOpen = !collapsed[bmKey]
@@ -88,10 +98,10 @@ export default function PayoutTree({ tree, bonusByUser, setBonusByUser, onPay, o
                       <span className={`payout-chevron ${bmOpen ? 'open' : ''}`}>&#9662;</span>
                     </button>
                     <div className="payout-group-content">
-                      <PayRow user={bm} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={1} />
+                      <PayRow user={bm} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} taxRate={taxRate} indent={1} />
                       {bmOpen && (bm.bidders || []).map(bidder => (
                         <div key={String(bidder.userId)} className="payout-group payout-bidder">
-                          <PayRow user={bidder} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={2} />
+                          <PayRow user={bidder} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} taxRate={taxRate} indent={2} />
                         </div>
                       ))}
                     </div>

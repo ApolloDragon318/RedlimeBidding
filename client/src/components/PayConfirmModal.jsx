@@ -1,9 +1,11 @@
-export default function PayConfirmModal({ payConfirm, adminBonus, payTxId, setPayTxId, paying, onConfirm, onCancel }) {
+export default function PayConfirmModal({ payConfirm, adminBonus, payTxId, setPayTxId, paying, onConfirm, onCancel, taxRate = 0.10 }) {
   if (!payConfirm) return null
 
   const base = Number(payConfirm.basePay) || 0
   const bonus = Number(adminBonus) || 0
   const total = base + bonus
+  const tax = +(total * taxRate).toFixed(2)
+  const net = +(total - tax).toFixed(2)
 
   return (
     <div className="modal-overlay" onClick={() => !paying && onCancel()}>
@@ -27,9 +29,17 @@ export default function PayConfirmModal({ payConfirm, adminBonus, payTxId, setPa
               <span className="pay-summary-label">Admin bonus</span>
               <span className="pay-summary-value">${bonus.toFixed(2)}</span>
             </div>
-            <div className="pay-summary-item pay-summary-total">
-              <span className="pay-summary-label">Total to send</span>
+            <div className="pay-summary-item">
+              <span className="pay-summary-label">Gross total</span>
               <span className="pay-summary-value">${total.toFixed(2)}</span>
+            </div>
+            <div className="pay-summary-item pay-summary-tax">
+              <span className="pay-summary-label">Tax ({(taxRate * 100).toFixed(0)}%)</span>
+              <span className="pay-summary-value">−${tax.toFixed(2)}</span>
+            </div>
+            <div className="pay-summary-item pay-summary-total">
+              <span className="pay-summary-label">Net to send</span>
+              <span className="pay-summary-value">${net.toFixed(2)}</span>
             </div>
           </div>
 

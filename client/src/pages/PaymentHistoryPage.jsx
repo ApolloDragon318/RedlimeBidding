@@ -36,10 +36,11 @@ export default function PaymentHistoryPage() {
                 <tr>
                   <th>Date</th>
                   <th>Base</th>
-                  <th>Admin bonus</th>
-                  <th>Total</th>
+                  <th>Bonus</th>
+                  <th>Gross</th>
+                  <th>Tax</th>
+                  <th>Net</th>
                   <th>TxID</th>
-                  <th>Wallet</th>
                 </tr>
               </thead>
               <tbody>
@@ -48,9 +49,10 @@ export default function PaymentHistoryPage() {
                     <td>{new Date(p.createdAt).toLocaleString()}</td>
                     <td>${Number(p.basePay).toFixed(2)}</td>
                     <td>${Number(p.adminBonus).toFixed(2)}</td>
-                    <td><strong>${Number(p.totalPay).toFixed(2)}</strong></td>
+                    <td>${Number(p.totalPay).toFixed(2)}</td>
+                    <td className="text-muted">−${Number(p.taxAmount ?? 0).toFixed(2)}</td>
+                    <td><strong>${Number(p.netPay ?? p.totalPay).toFixed(2)}</strong></td>
                     <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: '200px', wordBreak: 'break-all' }}>{p.txId || '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.7rem', maxWidth: '180px', wordBreak: 'break-all' }}>{p.walletAddress || '—'}</td>
                   </tr>
                 ))}
               </tbody>

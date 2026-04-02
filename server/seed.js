@@ -130,11 +130,20 @@ async function seed() {
     { opsLeadId: opsLead._id, name: 'Beta Profile', assignedBidderId: bidder2._id }
   ]);
 
-  const bidManagers = users.filter(u => u.role === 'bid_manager');
-  await SalaryConfig.insertMany(bidManagers.map(bm => ({
-    bidManagerId: bm._id,
-    bidManagerSalaryPerProfile: 10
-  })));
+  await SalaryConfig.insertMany([
+    { role: 'bidder', level: 'junior', rate: 0.06 },
+    { role: 'bidder', level: 'mid_level', rate: 0.08 },
+    { role: 'bidder', level: 'senior', rate: 0.10 },
+    { role: 'bidder', level: 'staff', rate: 0.12 },
+    { role: 'bid_manager', level: 'junior', rate: 8 },
+    { role: 'bid_manager', level: 'mid_level', rate: 10 },
+    { role: 'bid_manager', level: 'senior', rate: 12 },
+    { role: 'bid_manager', level: 'staff', rate: 15 },
+    { role: 'ops_lead', level: 'junior', rate: 30 },
+    { role: 'ops_lead', level: 'mid_level', rate: 40 },
+    { role: 'ops_lead', level: 'senior', rate: 50 },
+    { role: 'ops_lead', level: 'staff', rate: 60 }
+  ]);
 
   console.log('Seed complete. admin@redlime.com/admin123 · ops@redlime.com/ops123 · finance@redlime.com/fin123 · bidder1@redlime.com/bidder123');
   process.exit(0);

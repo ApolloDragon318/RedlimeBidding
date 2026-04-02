@@ -13,6 +13,7 @@ export default function FinancialDashboard() {
   const [payTxId, setPayTxId] = useState('')
   const [paying, setPaying] = useState(false)
   const [payoutRequests, setPayoutRequests] = useState([])
+  const [taxRate, setTaxRate] = useState(0.10)
 
   const loadQueueAndHistory = useCallback(async () => {
     const [q, h, pr] = await Promise.all([
@@ -21,6 +22,7 @@ export default function FinancialDashboard() {
       api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } }))
     ])
     setTree(q.data?.tree || [])
+    setTaxRate(q.data?.taxRate ?? 0.10)
     setPayoutRequests(pr.data?.requests || [])
     setHistory({
       personPayouts: h.data?.personPayouts || [],
@@ -98,6 +100,7 @@ export default function FinancialDashboard() {
               setBonusByUser={setAdminBonusByUser}
               onPay={user => setPayConfirm(user)}
               onRefresh={loadQueueAndHistory}
+              taxRate={taxRate}
             />
           </div>
         </>
@@ -114,7 +117,7 @@ export default function FinancialDashboard() {
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
-                  <tr><th>Date</th><th>Name</th><th>Role</th><th>Total</th><th>TxID</th></tr>
+                  <tr><th>Date</th><th>Name</th><th>Role</th><th>Gross</th><th>Tax</th><th>Net</th><th>TxID</th></tr>
                 </thead>
                 <tbody>
                   {history.personPayouts.map(h => (
@@ -123,6 +126,8 @@ export default function FinancialDashboard() {
                       <td>{h.name}</td>
                       <td>{h.role?.replace(/_/g, ' ')}</td>
                       <td>${Number(h.totalPay).toFixed(2)}</td>
+                      <td className="text-muted">−${Number(h.taxAmount ?? 0).toFixed(2)}</td>
+                      <td><strong>${Number(h.netPay ?? h.totalPay).toFixed(2)}</strong></td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: '180px', wordBreak: 'break-all' }}>{h.txId || '—'}</td>
                     </tr>
                   ))}
@@ -141,6 +146,7 @@ export default function FinancialDashboard() {
         paying={paying}
         onConfirm={confirmPersonPay}
         onCancel={() => { setPayConfirm(null); setPayTxId('') }}
+        taxRate={taxRate}
       />
     </div>
   )
