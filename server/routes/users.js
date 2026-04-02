@@ -8,9 +8,24 @@ import {
   ADMIN_ASSIGNABLE_ROLES,
   USER_LEVELS
 } from '../constants/onboarding.js';
-import { UPLOADS_ROOT } from '../middleware/uploadOnboarding.js';
+import { UPLOADS_ROOT, isCloudinary } from '../middleware/uploadOnboarding.js';
 
 const uploadsRoot = path.resolve(UPLOADS_ROOT);
+
+function isUrl(p) { return p && (p.startsWith('http://') || p.startsWith('https://')); }
+
+function serveFileOrRedirect(res, filePath) {
+  if (isUrl(filePath)) {
+    return res.redirect(filePath);
+  }
+  const full = path.join(uploadsRoot, filePath);
+  const resolved = path.resolve(full);
+  if (!resolved.startsWith(path.resolve(uploadsRoot))) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
+  res.sendFile(resolved);
+}
 
 const router = express.Router();
 
@@ -180,11 +195,7 @@ router.get('/org/:id/photo', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('photoFile');
     if (!user?.photoFile?.path) return res.status(404).json({ error: 'No photo' });
-    const full = path.join(uploadsRoot, user.photoFile.path);
-    const resolved = path.resolve(full);
-    if (!resolved.startsWith(path.resolve(uploadsRoot))) return res.status(400).json({ error: 'Invalid path' });
-    if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
-    res.sendFile(resolved);
+    serveFileOrRedirect(res, user.photoFile.path);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -247,13 +258,7 @@ router.get('/:id/national-id', authenticate, requireRole('admin', 'ops_lead'), a
   try {
     const user = await User.findById(req.params.id).select('nationalIdFile');
     if (!user?.nationalIdFile?.path) return res.status(404).json({ error: 'No national ID on file' });
-    const full = path.join(uploadsRoot, user.nationalIdFile.path);
-    const resolved = path.resolve(full);
-    if (!resolved.startsWith(path.resolve(uploadsRoot))) {
-      return res.status(400).json({ error: 'Invalid path' });
-    }
-    if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
-    res.sendFile(resolved);
+    serveFileOrRedirect(res, user.nationalIdFile.path);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -263,13 +268,7 @@ router.get('/:id/photo', authenticate, requireRole('admin', 'ops_lead'), async (
   try {
     const user = await User.findById(req.params.id).select('photoFile');
     if (!user?.photoFile?.path) return res.status(404).json({ error: 'No photo on file' });
-    const full = path.join(uploadsRoot, user.photoFile.path);
-    const resolved = path.resolve(full);
-    if (!resolved.startsWith(path.resolve(uploadsRoot))) {
-      return res.status(400).json({ error: 'Invalid path' });
-    }
-    if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
-    res.sendFile(resolved);
+    serveFileOrRedirect(res, user.photoFile.path);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

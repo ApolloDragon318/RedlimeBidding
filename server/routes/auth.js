@@ -8,14 +8,27 @@ import { isValidErc20Address, normalizeErc20Address } from '../utils/erc20Addres
 import {
   uploadOnboardingFiles,
   uploadProfileFiles,
+  fileStoragePath,
+  isCloudinary,
   UPLOADS_ROOT
 } from '../middleware/uploadOnboarding.js';
 
 const router = express.Router();
 const uploadsRootResolved = path.resolve(UPLOADS_ROOT);
 
-function fileToRelativePath(file) {
-  return path.relative(uploadsRootResolved, file.path).replace(/\\/g, '/');
+function isUrl(p) { return p && (p.startsWith('http://') || p.startsWith('https://')); }
+
+function serveFileOrRedirect(res, filePath) {
+  if (isUrl(filePath)) {
+    return res.redirect(filePath);
+  }
+  const full = path.join(uploadsRootResolved, filePath);
+  const resolved = path.resolve(full);
+  if (!resolved.startsWith(uploadsRootResolved)) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
+  res.sendFile(resolved);
 }
 
 function issueToken(userId) {
@@ -155,11 +168,11 @@ router.post('/complete-onboarding', authenticate, (req, res, next) => {
     user.country = country.trim();
     user.state = state.trim();
     user.nationalIdFile = {
-      path: fileToRelativePath(idFile),
+      path: fileStoragePath(idFile),
       originalName: idFile.originalname
     };
     user.photoFile = {
-      path: fileToRelativePath(photoFile),
+      path: fileStoragePath(photoFile),
       originalName: photoFile.originalname
     };
     user.usdtErc20Wallet = raw;
@@ -183,13 +196,7 @@ router.get('/profile-photo', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('photoFile');
     if (!user?.photoFile?.path) return res.status(404).json({ error: 'No photo on file' });
-    const full = path.join(uploadsRootResolved, user.photoFile.path);
-    const resolved = path.resolve(full);
-    if (!resolved.startsWith(uploadsRootResolved)) {
-      return res.status(400).json({ error: 'Invalid path' });
-    }
-    if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'File missing' });
-    res.sendFile(resolved);
+    serveFileOrRedirect(res, user.photoFile.path);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -233,13 +240,13 @@ router.patch('/profile', authenticate, (req, res, next) => {
     const files = req.files || {};
     if (files.photo?.[0]) {
       user.photoFile = {
-        path: fileToRelativePath(files.photo[0]),
+        path: fileStoragePath(files.photo[0]),
         originalName: files.photo[0].originalname
       };
     }
     if (files.nationalId?.[0]) {
       user.nationalIdFile = {
-        path: fileToRelativePath(files.nationalId[0]),
+        path: fileStoragePath(files.nationalId[0]),
         originalName: files.nationalId[0].originalname
       };
     }
