@@ -40,6 +40,11 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
         { $set: { status: 'approved' } }
       );
       if (r2.modifiedCount > 0) console.log(`Migrated ${r2.modifiedCount} users: missing status → approved`);
+
+      try {
+        await db.collection('salaryconfigs').dropIndex('bidManagerId_1');
+        console.log('Dropped legacy bidManagerId_1 index from salaryconfigs');
+      } catch (_) { /* index already gone */ }
     }
   })
   .catch(err => console.error('MongoDB error:', err));

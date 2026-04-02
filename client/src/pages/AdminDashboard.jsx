@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api'
 import PayoutTree from '../components/PayoutTree'
 import PayConfirmModal from '../components/PayConfirmModal'
+import SalaryRateGrid from '../components/SalaryRateGrid'
 
 const ADMIN_DIRECT_ROLES = [
   { value: 'ops_lead', label: 'Ops Lead' },
@@ -25,7 +26,6 @@ export default function AdminDashboard() {
   const [biddersList, setBiddersList] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('payouts')
-  const [savingSalary, setSavingSalary] = useState(false)
   const [savingAssign, setSavingAssign] = useState(false)
   const [personPayouts, setPersonPayouts] = useState([])
   const [legacyBatchPayouts, setLegacyBatchPayouts] = useState([])
@@ -184,16 +184,10 @@ export default function AdminDashboard() {
 
   const formatLevel = (l) => l ? l.replace(/_/g, ' ') : '—'
 
-  const saveRate = async (role, level, rate) => {
-    setSavingSalary(true)
-    try {
-      const res = await api.put('/salary/rate', { role, level, rate: Number(rate) })
-      setSalaryGrid(res.data?.grid || {})
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to save')
-    } finally {
-      setSavingSalary(false)
-    }
+  const handleSalaryUpdate = (data) => {
+    setSalaryGrid(data?.grid || {})
+    setSalaryRoles(data?.roles || [])
+    setSalaryLevels(data?.levels || [])
   }
 
   const assignOpsLead = async (bidManagerId, opsLeadId) => {
@@ -219,10 +213,6 @@ export default function AdminDashboard() {
       setSavingAssign(false)
     }
   }
-
-  const ROLE_LABELS = { bidder: 'Bidder', bid_manager: 'Bid Manager', ops_lead: 'Ops Lead' }
-  const LEVEL_LABELS = { junior: 'Junior', mid_level: 'Mid-level', senior: 'Senior', staff: 'Staff' }
-  const RATE_UNITS = { bidder: '$ / bid', bid_manager: '$ / profile', ops_lead: '$ / person' }
 
   const confirmPersonPay = async () => {
     if (!payConfirm) return
@@ -672,69 +662,12 @@ export default function AdminDashboard() {
 
       {/* ── Salary Config ── */}
       {activeTab === 'salary' && (
-        <div className="card">
-          <div className="card-header">
-            <h3>Salary rates</h3>
-            <span className="card-subtitle">Same role &amp; level = same rate. Changes apply to all future payouts.</span>
-          </div>
-          <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
-            <strong>Bidder:</strong> bid count &times; rate + BM bonus &nbsp;|&nbsp;
-            <strong>Bid Manager:</strong> profiles &times; rate + Ops bonus &nbsp;|&nbsp;
-            <strong>Ops Lead:</strong> people &times; rate
-          </p>
-
-          <div className="rate-grid-wrap">
-            <table className="rate-grid">
-              <thead>
-                <tr>
-                  <th className="rate-grid-corner">Role \ Level</th>
-                  {salaryLevels.map(l => (
-                    <th key={l}>{LEVEL_LABELS[l] || l}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {salaryRoles.map(role => (
-                  <tr key={role}>
-                    <td className="rate-grid-role">
-                      <span>{ROLE_LABELS[role] || role}</span>
-                      <span className="rate-grid-unit">{RATE_UNITS[role]}</span>
-                    </td>
-                    {salaryLevels.map(level => {
-                      const val = salaryGrid[role]?.[level] ?? 0
-                      return (
-                        <td key={level} className="rate-grid-cell">
-                          <input
-                            type="number"
-                            step="0.001"
-                            min="0"
-                            defaultValue={val}
-                            key={`${role}-${level}-${val}`}
-                            className="rate-grid-input"
-                            disabled={savingSalary}
-                            onBlur={e => {
-                              const newVal = Number(e.target.value)
-                              if (newVal !== val) saveRate(role, level, newVal)
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.target.blur()
-                              }
-                            }}
-                          />
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p className="text-muted" style={{ fontSize: '0.8rem', marginTop: '0.75rem' }}>
-            Edit a cell and press Enter or click away to save. All employees with the same role &amp; level share the same rate.
-          </p>
-        </div>
+        <SalaryRateGrid
+          grid={salaryGrid}
+          roles={salaryRoles}
+          levels={salaryLevels}
+          onUpdate={handleSalaryUpdate}
+        />
       )}
 
       <PayConfirmModal

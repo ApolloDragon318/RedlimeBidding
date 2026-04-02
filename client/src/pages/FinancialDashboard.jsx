@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api'
 import PayoutTree from '../components/PayoutTree'
 import PayConfirmModal from '../components/PayConfirmModal'
+import SalaryRateGrid from '../components/SalaryRateGrid'
 
 export default function FinancialDashboard() {
   const [tree, setTree] = useState([])
@@ -14,16 +15,23 @@ export default function FinancialDashboard() {
   const [paying, setPaying] = useState(false)
   const [payoutRequests, setPayoutRequests] = useState([])
   const [taxRate, setTaxRate] = useState(0.10)
+  const [salaryGrid, setSalaryGrid] = useState({})
+  const [salaryRoles, setSalaryRoles] = useState([])
+  const [salaryLevels, setSalaryLevels] = useState([])
 
   const loadQueueAndHistory = useCallback(async () => {
-    const [q, h, pr] = await Promise.all([
+    const [q, h, pr, sal] = await Promise.all([
       api.get('/salary/payout-queue').catch(() => ({ data: { rows: [], tree: [] } })),
       api.get('/salary/history').catch(() => ({ data: { personPayouts: [], legacyBatchPayouts: [] } })),
-      api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } }))
+      api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } })),
+      api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } }))
     ])
     setTree(q.data?.tree || [])
     setTaxRate(q.data?.taxRate ?? 0.10)
     setPayoutRequests(pr.data?.requests || [])
+    setSalaryGrid(sal.data?.grid || {})
+    setSalaryRoles(sal.data?.roles || [])
+    setSalaryLevels(sal.data?.levels || [])
     setHistory({
       personPayouts: h.data?.personPayouts || [],
       legacyBatchPayouts: h.data?.legacyBatchPayouts || []
@@ -65,6 +73,7 @@ export default function FinancialDashboard() {
 
       <div className="tabs" style={{ marginBottom: '1rem' }}>
         <button type="button" className={tab === 'queue' ? 'tab active' : 'tab'} onClick={() => setTab('queue')}>Payouts</button>
+        <button type="button" className={tab === 'salary' ? 'tab active' : 'tab'} onClick={() => setTab('salary')}>Salary Config</button>
         <button type="button" className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>History</button>
       </div>
 
@@ -104,6 +113,19 @@ export default function FinancialDashboard() {
             />
           </div>
         </>
+      )}
+
+      {tab === 'salary' && (
+        <SalaryRateGrid
+          grid={salaryGrid}
+          roles={salaryRoles}
+          levels={salaryLevels}
+          onUpdate={(data) => {
+            setSalaryGrid(data?.grid || {})
+            setSalaryRoles(data?.roles || [])
+            setSalaryLevels(data?.levels || [])
+          }}
+        />
       )}
 
       {tab === 'history' && (

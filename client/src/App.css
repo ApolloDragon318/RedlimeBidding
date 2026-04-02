@@ -1809,6 +1809,29 @@
 }
 
 /* ── Salary rate grid ── */
+.rate-formula-bar {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 0;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.rate-formula {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.rate-formula-role {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
 .rate-grid-wrap {
   overflow-x: auto;
 }
@@ -1859,7 +1882,55 @@
 }
 
 .rate-grid-cell {
-  padding: 0.4rem !important;
+  padding: 0.35rem !important;
+  min-width: 120px;
+}
+
+.rate-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.rate-display:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.rate-display-value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.rate-display-edit {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rate-display:hover .rate-display-edit {
+  opacity: 1;
+  color: var(--primary);
+}
+
+.rate-edit-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .rate-grid-input {
@@ -1871,15 +1942,59 @@
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  font-weight: 600;
   text-align: center;
   transition: border-color 0.15s;
+}
+
+.rate-grid-input-active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
 }
 
 .rate-grid-input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
+}
+
+.rate-edit-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.rate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.rate-btn-save {
+  background: var(--primary);
+  color: #fff;
+}
+
+.rate-btn-save:hover {
+  background: var(--primary-hover, #4f46e5);
+}
+
+.rate-btn-cancel {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+.rate-btn-cancel:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 @media (max-width: 640px) {
@@ -1888,9 +2003,16 @@
     padding: 0.5rem 0.4rem;
     font-size: 0.8rem;
   }
+  .rate-grid-cell {
+    min-width: 100px;
+  }
   .rate-grid-input {
     max-width: 80px;
     font-size: 0.82rem;
+  }
+  .rate-formula-bar {
+    flex-direction: column;
+    gap: 0.4rem;
   }
 }
 
