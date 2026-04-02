@@ -3,11 +3,11 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
-import User from './models/User.js';
 import authRoutes from './routes/auth.js';
 import reportRoutes from './routes/reports.js';
 import userRoutes from './routes/users.js';
 import salaryRoutes from './routes/salary.js';
+import profileRoutes from './routes/profiles.js';
 
 dotenv.config();
 
@@ -28,12 +28,19 @@ app.use(express.json());
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-bidding')
   .then(async () => {
     console.log('MongoDB connected');
-    // Migrate legacy users without status to approved
-    const r = await User.updateMany(
-      { $or: [{ status: { $exists: false } }, { status: null }] },
-      { $set: { status: 'approved' } }
-    );
-    if (r.modifiedCount > 0) console.log(`Migrated ${r.modifiedCount} users to approved`);
+    const db = mongoose.connection.db;
+    if (db) {
+      const r1 = await db.collection('users').updateMany(
+        { status: 'pending' },
+        { $set: { status: 'pending_admin' } }
+      );
+      if (r1.modifiedCount > 0) console.log(`Migrated ${r1.modifiedCount} users: pending → pending_admin`);
+      const r2 = await db.collection('users').updateMany(
+        { $or: [{ status: { $exists: false } }, { status: null }] },
+        { $set: { status: 'approved' } }
+      );
+      if (r2.modifiedCount > 0) console.log(`Migrated ${r2.modifiedCount} users: missing status → approved`);
+    }
   })
   .catch(err => console.error('MongoDB error:', err));
 
@@ -41,6 +48,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/salary', salaryRoutes);
+app.use('/api/profiles', profileRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

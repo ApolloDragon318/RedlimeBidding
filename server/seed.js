@@ -2,30 +2,141 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import User from './models/User.js';
 import SalaryConfig from './models/SalaryConfig.js';
+import ImProfile from './models/ImProfile.js';
+import Report from './models/Report.js';
 
 dotenv.config();
 
+const demoProfile = {
+  phone: '+10000000000',
+  address: '1 Demo Street',
+  nationality: 'US',
+  country: 'United States',
+  state: 'CA',
+  legalFirstName: 'Demo',
+  legalMiddleName: '',
+  legalLastName: 'User'
+};
+
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-bidding');
+  await Report.deleteMany({});
+  await ImProfile.deleteMany({});
   await User.deleteMany({});
   await SalaryConfig.deleteMany({});
 
   const users = await User.create([
-    { email: 'admin@redlime.com', password: 'admin123', name: 'Admin User', role: 'admin', status: 'approved' },
-    { email: 'bid1@redlime.com', password: 'bid123', name: 'John Bid Manager', role: 'bid_manager', status: 'approved' },
-    { email: 'bid2@redlime.com', password: 'bid123', name: 'Jane Bid Manager', role: 'bid_manager', status: 'approved' },
-    { email: 'inv1@redlime.com', password: 'inv123', name: 'Alice Investigation Manager', role: 'investigation_manager', status: 'approved' },
-    { email: 'inv2@redlime.com', password: 'inv123', name: 'Bob Investigation Manager', role: 'investigation_manager', status: 'approved' }
+    {
+      email: 'admin@redlime.com',
+      password: 'admin123',
+      name: 'Admin User',
+      ...demoProfile,
+      legalFirstName: 'Admin',
+      legalLastName: 'User',
+      role: 'admin',
+      status: 'approved',
+      level: 'staff'
+    },
+    {
+      email: 'ops@redlime.com',
+      password: 'ops123',
+      name: 'Ops Lead',
+      ...demoProfile,
+      legalFirstName: 'Ops',
+      legalLastName: 'Lead',
+      role: 'ops_lead',
+      status: 'approved',
+      level: 'senior',
+      usdtErc20Wallet: '0x1111111111111111111111111111111111111111',
+      opsTeamRate: 50
+    },
+    {
+      email: 'bid1@redlime.com',
+      password: 'bid123',
+      name: 'John Bid Manager',
+      ...demoProfile,
+      legalFirstName: 'John',
+      legalLastName: 'Manager',
+      role: 'bid_manager',
+      status: 'approved',
+      level: 'mid_level',
+      usdtErc20Wallet: '0x2222222222222222222222222222222222222222'
+    },
+    {
+      email: 'bid2@redlime.com',
+      password: 'bid123',
+      name: 'Jane Bid Manager',
+      ...demoProfile,
+      legalFirstName: 'Jane',
+      legalLastName: 'Manager',
+      role: 'bid_manager',
+      status: 'approved',
+      level: 'senior',
+      usdtErc20Wallet: '0x3333333333333333333333333333333333333333'
+    },
+    {
+      email: 'bidder1@redlime.com',
+      password: 'bidder123',
+      name: 'Chris Bidder',
+      ...demoProfile,
+      legalFirstName: 'Chris',
+      legalLastName: 'Bidder',
+      role: 'bidder',
+      status: 'approved',
+      level: 'mid_level',
+      salaryPerBid: 0.08,
+      usdtErc20Wallet: '0x4444444444444444444444444444444444444444'
+    },
+    {
+      email: 'bidder2@redlime.com',
+      password: 'bidder123',
+      name: 'Dana Bidder',
+      ...demoProfile,
+      legalFirstName: 'Dana',
+      legalLastName: 'Bidder',
+      role: 'bidder',
+      status: 'approved',
+      level: 'senior',
+      salaryPerBid: 0.1,
+      usdtErc20Wallet: '0x5555555555555555555555555555555555555555'
+    },
+    {
+      email: 'finance@redlime.com',
+      password: 'fin123',
+      name: 'Finance User',
+      ...demoProfile,
+      legalFirstName: 'Finance',
+      legalLastName: 'User',
+      role: 'financial_manager',
+      status: 'approved',
+      level: 'senior',
+      usdtErc20Wallet: '0x6666666666666666666666666666666666666666'
+    }
+  ]);
+
+  const opsLead = users.find(u => u.role === 'ops_lead');
+  const bm1 = users.find(u => u.email === 'bid1@redlime.com');
+  const bm2 = users.find(u => u.email === 'bid2@redlime.com');
+  const bidder1 = users.find(u => u.email === 'bidder1@redlime.com');
+  const bidder2 = users.find(u => u.email === 'bidder2@redlime.com');
+
+  await User.updateMany({ role: 'bid_manager' }, { $set: { opsLeadId: opsLead._id } });
+  await User.updateOne({ _id: bidder1._id }, { $set: { bidManagerId: bm1._id } });
+  await User.updateOne({ _id: bidder2._id }, { $set: { bidManagerId: bm2._id } });
+
+  await ImProfile.create([
+    { opsLeadId: opsLead._id, name: 'Alpha Profile', assignedBidderId: bidder1._id },
+    { opsLeadId: opsLead._id, name: 'Gamma Profile', assignedBidderId: bidder1._id },
+    { opsLeadId: opsLead._id, name: 'Beta Profile', assignedBidderId: bidder2._id }
   ]);
 
   const bidManagers = users.filter(u => u.role === 'bid_manager');
   await SalaryConfig.insertMany(bidManagers.map(bm => ({
     bidManagerId: bm._id,
-    bidManagerSalaryPerProfile: 10,
-    bidderSalaryPerBid: 0.08
+    bidManagerSalaryPerProfile: 10
   })));
 
-  console.log('Seed complete. Users: admin@redlime.com/admin123, bid1@redlime.com/bid123, inv1@redlime.com/inv123');
+  console.log('Seed complete. admin@redlime.com/admin123 · ops@redlime.com/ops123 · finance@redlime.com/fin123 · bidder1@redlime.com/bidder123');
   process.exit(0);
 }
 

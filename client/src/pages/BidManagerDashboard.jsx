@@ -1,64 +1,63 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api'
+import { labelWorkflow } from '../workflowLabels'
 
-function getMonday(d) {
+function startOfWeekSunday(d) {
   const date = new Date(d)
   const day = date.getDay()
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1)
-  return new Date(date.setDate(diff)).toISOString().slice(0, 10)
+  date.setDate(date.getDate() - day)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
 }
 
 export default function BidManagerDashboard() {
   const [reports, setReports] = useState([])
-  const [investigationManagers, setInvestigationManagers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({
-    investigationManagerId: '',
-    bidderName: '',
-    profileName: '',
-    bidCount: '',
-    bonus: '0',
-    weekStartDate: getMonday(new Date())
-  })
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
   const [showExpectedPay, setShowExpectedPay] = useState(false)
   const [expectedPayData, setExpectedPayData] = useState(null)
+  const [bonuses, setBonuses] = useState({})
+  const [approving, setApproving] = useState(false)
 
   useEffect(() => {
-    Promise.all([
-      api.get('/reports'),
-      api.get('/users/investigation-managers')
-    ]).then(([r1, r2]) => {
-      setReports(r1.data)
-      setInvestigationManagers(r2.data)
+    api.get('/reports').then(res => {
+      setReports(res.data)
+      const b = {}
+      res.data.forEach(r => {
+        if (r.workflowStatus === 'awaiting_bid_manager') b[r._id] = r.bidManagerBonus ?? 0
+      })
+      setBonuses(b)
     }).catch(console.error).finally(() => setLoading(false))
   }, [])
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
-    setSubmitting(true)
+  const setBonus = (id, v) => setBonuses(prev => ({ ...prev, [id]: v }))
+
+  const approveAll = async () => {
+    const bonusMap = {}
+    for (const [id, v] of Object.entries(bonuses)) {
+      const n = Number(v)
+      if (Number.isNaN(n)) { alert('One of the bonus values is invalid'); return }
+      bonusMap[id] = n
+    }
+    setApproving(true)
     try {
-      const { data } = await api.post('/reports', form)
-      setReports(prev => [data, ...prev])
-      setForm({ investigationManagerId: '', bidderName: '', profileName: '', bidCount: '', bonus: '0', weekStartDate: getMonday(new Date()) })
-      setShowForm(false)
+      await api.post('/reports/bid-manager/approve-all', { bonuses: bonusMap })
+      const { data } = await api.get('/reports')
+      setReports(data)
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create report')
+      alert(err.response?.data?.error || 'Failed to approve')
     } finally {
-      setSubmitting(false)
+      setApproving(false)
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this report?')) return
+  const decline = async (id) => {
+    const reason = prompt('Decline reason:')
+    if (reason == null) return
     try {
-      await api.delete(`/reports/${id}`)
-      setReports(prev => prev.filter(r => r._id !== id))
+      const { data } = await api.patch(`/reports/${id}/decline-bid-manager`, { declineReason: reason })
+      setReports(prev => prev.map(r => r._id === id ? data : r))
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete')
+      alert(err.response?.data?.error || 'Failed to decline')
     }
   }
 
@@ -72,213 +71,190 @@ export default function BidManagerDashboard() {
     }
   }
 
+  const awaiting = reports.filter(r => r.workflowStatus === 'awaiting_bid_manager')
+  const rest = reports.filter(r => r.workflowStatus !== 'awaiting_bid_manager')
+
+  const profilesThisWeek = useMemo(() => {
+    const t = startOfWeekSunday(new Date())
+    const names = new Set()
+    reports.forEach(r => {
+      if (startOfWeekSunday(new Date(r.weekStartDate)) === t) names.add(String(r.profileName))
+    })
+    return names.size
+  }, [reports])
+
   if (loading) return <div className="page-loading"><div className="spinner" /></div>
 
   return (
     <div className="page">
       <div className="page-header">
-        <h2>Bid Manager Dashboard</h2>
-        <p className="page-desc">Report bidder work every Monday</p>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={fetchExpectedPay} className="btn btn-ghost">Expected Pay</button>
-          <button onClick={() => setShowForm(!showForm)} className="btn btn-primary">
-            {showForm ? 'Cancel' : '+ New Report'}
-          </button>
+        <h2>My Reports</h2>
+        <p className="page-desc">
+          Review bidder work, set individual bonuses, then approve all at once. Your pay = profiles &times; rate + Ops Lead bonus.
+        </p>
+        <button type="button" onClick={fetchExpectedPay} className="btn btn-ghost">Expected Pay</button>
+      </div>
+
+      {/* ── Week summary ── */}
+      <div className="card">
+        <div className="card-header">
+          <h3>This week</h3>
+        </div>
+        <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+          <div className="stat-block">
+            <span className="stat-value">{profilesThisWeek}</span>
+            <span className="stat-label">Active profiles</span>
+          </div>
+          <div className="stat-block">
+            <span className="stat-value">{awaiting.length}</span>
+            <span className="stat-label">Pending approval</span>
+          </div>
+          <div className="stat-block">
+            <span className="stat-value">{rest.length}</span>
+            <span className="stat-label">Other stages</span>
+          </div>
         </div>
       </div>
 
-      {showForm && (
-        <div className="card form-card">
-          <h3>New Report</h3>
-          <form onSubmit={handleSubmit} className="report-form">
-            <div className="form-row">
-              <label>Investigation Manager</label>
-              <select
-                value={form.investigationManagerId}
-                onChange={e => setForm(f => ({ ...f, investigationManagerId: e.target.value }))}
-                required
-              >
-                <option value="">Select...</option>
-                {investigationManagers.map(im => (
-                  <option key={im._id} value={im._id}>{im.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-row">
-              <label>Bidder Name</label>
-              <input
-                value={form.bidderName}
-                onChange={e => setForm(f => ({ ...f, bidderName: e.target.value }))}
-                placeholder="Bidder's name"
-                required
-              />
-            </div>
-            <div className="form-row">
-              <label>Profile Name</label>
-              <input
-                value={form.profileName}
-                onChange={e => setForm(f => ({ ...f, profileName: e.target.value }))}
-                placeholder="Profile name"
-                required
-              />
-            </div>
-            <div className="form-row form-row-2">
-              <div>
-                <label>Bid Count (weekly)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.bidCount}
-                  onChange={e => setForm(f => ({ ...f, bidCount: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <label>Bonus</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.bonus}
-                  onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="form-row">
-              <label>Week Start (Monday)</label>
-              <input
-                type="date"
-                value={form.weekStartDate}
-                onChange={e => setForm(f => ({ ...f, weekStartDate: e.target.value }))}
-                required
-              />
-            </div>
-            {error && <p className="error-msg">{error}</p>}
-            <button type="submit" disabled={submitting} className="btn btn-primary">
-              {submitting ? 'Submitting...' : 'Submit Report'}
-            </button>
-          </form>
-        </div>
-      )}
-
+      {/* ── Awaiting approval ── */}
       <div className="card">
-        <h3>My Reports</h3>
-        {reports.length === 0 ? (
-          <p className="empty-state">No reports yet. Create one above.</p>
+        <div className="card-header">
+          <h3>Awaiting your approval</h3>
+          <span className="card-subtitle">{awaiting.length} report{awaiting.length !== 1 ? 's' : ''}</span>
+          {awaiting.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={approveAll}
+              disabled={approving}
+              style={{ marginLeft: 'auto' }}
+            >
+              {approving ? 'Approving...' : `Approve all (${awaiting.length})`}
+            </button>
+          )}
+        </div>
+        {awaiting.length === 0 ? (
+          <p className="empty-state">All caught up — nothing pending.</p>
         ) : (
+          <div className="approval-list">
+            {awaiting.map(r => (
+              <div key={r._id} className="approval-item">
+                <div className="approval-item-main">
+                  <div className="approval-item-info">
+                    <span className="approval-item-bidder">{r.bidderId?.name || r.bidderName}</span>
+                    <span className="approval-item-profile">{r.profileName}</span>
+                  </div>
+                  <div className="approval-item-details">
+                    <div className="approval-detail">
+                      <span className="approval-detail-label">Bids</span>
+                      <span className="approval-detail-value">{r.bidCount}</span>
+                    </div>
+                    <div className="approval-detail">
+                      <span className="approval-detail-label">Week</span>
+                      <span className="approval-detail-value">{new Date(r.weekStartDate).toLocaleDateString()}</span>
+                    </div>
+                    {r.bidManagerId?.opsLeadId?.name && (
+                      <div className="approval-detail">
+                        <span className="approval-detail-label">Ops Lead</span>
+                        <span className="approval-detail-value">{r.bidManagerId.opsLeadId.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="approval-item-actions">
+                  <div className="approval-bonus">
+                    <label>Bonus $</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0"
+                      value={bonuses[r._id] ?? ''}
+                      onChange={e => setBonus(r._id, e.target.value)}
+                    />
+                  </div>
+                  <button type="button" onClick={() => decline(r._id)} className="btn btn-ghost btn-sm btn-danger">Decline</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Pipeline ── */}
+      {rest.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <h3>Pipeline</h3>
+            <span className="card-subtitle">{rest.length} report{rest.length !== 1 ? 's' : ''} in other stages</span>
+          </div>
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Investigation Manager</th>
                   <th>Bidder</th>
                   <th>Profile</th>
-                  <th>Bid Count</th>
-                  <th>Bonus</th>
                   <th>Week</th>
                   <th>Status</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {reports.map(r => (
+                {rest.map(r => (
                   <tr key={r._id}>
-                    <td>{r.investigationManagerId?.name}</td>
-                    <td>{r.bidderName}</td>
+                    <td>{r.bidderId?.name || r.bidderName}</td>
                     <td>{r.profileName}</td>
-                    <td>{r.bidCount}</td>
-                    <td>${r.bonus}</td>
                     <td>{new Date(r.weekStartDate).toLocaleDateString()}</td>
-                    <td>
-                      <span className={`badge badge-${r.status}`}>{r.status}</span>
-                    </td>
-                    <td>
-                      {r.status === 'pending' && (
-                        <button onClick={() => handleDelete(r._id)} className="btn btn-ghost btn-sm btn-danger">Delete</button>
-                      )}
-                    </td>
+                    <td><span className="badge badge-pending">{labelWorkflow(r.workflowStatus)}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
+      {/* ── Expected Pay modal ── */}
       {showExpectedPay && (
         <div className="modal-overlay" onClick={() => setShowExpectedPay(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Expected Pay</h3>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowExpectedPay(false)}>×</button>
+              <button type="button" className="modal-close" onClick={() => setShowExpectedPay(false)}>&times;</button>
             </div>
             <div className="modal-body">
               {expectedPayData ? (
                 <>
-                  <div className="report-field">
-                    <label>Total Expected Pay</label>
-                    <div className="report-value">${(expectedPayData.total != null && expectedPayData.total !== 'NaN') ? expectedPayData.total : '0.00'}</div>
-                    <div className="total-breakdown">
-                      <span>Bidder's work (deducted): ${expectedPayData.totalBidderWork ?? '0.00'}</span>
-                      <span>Bid management (deducted): ${expectedPayData.totalBidManagement ?? '0.00'}</span>
+                  <div className="pay-summary-grid" style={{ gridTemplateColumns: '1fr' }}>
+                    <div className="pay-summary-item pay-summary-total">
+                      <span className="pay-summary-label">Total expected</span>
+                      <span className="pay-summary-value">${expectedPayData.total}</span>
                     </div>
                   </div>
-                  <div className="report-field calc-process-box">
-                    <label>Calculation Process</label>
-                    <div className="calc-process-desc">
-                      (profiles × $/profile) + (bids × $/bid) + bonus - deductions = amount you receive. Your rates are set by admin.
+                  <p className="card-subtitle" style={{ margin: '0.75rem 0' }}>
+                    {expectedPayData.formulaSummary}
+                  </p>
+                  {expectedPayData.perProfile?.length > 0 && (
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr><th>Profile</th><th>Week</th><th>Ops bonus</th><th>Your pay</th></tr>
+                        </thead>
+                        <tbody>
+                          {expectedPayData.perProfile.map((p, i) => (
+                            <tr key={p.reportId || i}>
+                              <td>{p.profileName}</td>
+                              <td>{new Date(p.weekStartDate).toLocaleDateString()}</td>
+                              <td>${p.opsBonus ?? '0.00'}</td>
+                              <td>${p.bmPay}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    {expectedPayData.perProfile?.[0]?.formula && (
-                      <div className="calc-process-example">
-                        Example: {expectedPayData.perProfile[0].formula}
-                      </div>
-                    )}
-                  </div>
-                  <div className="report-field">
-                    <label>Per Profile</label>
-                    {!expectedPayData.perProfile?.length ? (
-                      <p className="empty-state">No approved reports yet.</p>
-                    ) : (
-                      <div className="table-wrap">
-                        <table className="data-table">
-                          <thead>
-                            <tr><th>Profile</th><th>Bidder</th><th>Week</th><th>Bidder's work (deducted)</th><th>Bid management (deducted)</th><th>Calculation</th></tr>
-                          </thead>
-                          <tbody>
-                            {expectedPayData.perProfile.map((p, i) => (
-                              <tr key={p.reportId || i}>
-                                <td>{p.profileName}</td>
-                                <td>{p.bidderName}</td>
-                                <td>{new Date(p.weekStartDate).toLocaleDateString()}</td>
-                                <td>${p.bidderNet ?? '0.00'}</td>
-                                <td>${p.bidManagementNet ?? '0.00'}</td>
-                                <td className="formula-cell">
-                                  <span className="formula-text">
-                                    {p.tableFormula || (() => {
-                                      const bc = p.bidCount ?? 0
-                                      const bn = parseFloat(p.bonus) || 0
-                                      const bdR = p.bidderRate ?? 0
-                                      const bidderDed = bc * 0.01
-                                      const profilePay = parseFloat(p.profilePay) || 0
-                                      const bidderNet = profilePay + bn - bidderDed
-                                      const parts = [
-                                        bc > 0 && `${bc} × $${Number(bdR).toFixed(2)}`,
-                                        bn > 0 && `$${bn} bonus`
-                                      ].filter(Boolean)
-                                      return parts.length ? `${parts.join(' + ')} - $${bidderDed.toFixed(2)} = $${bidderNet.toFixed(2)}` : '—'
-                                    })()}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </>
               ) : (
-                <p className="empty-state">No approved reports yet.</p>
+                <p className="empty-state">Loading...</p>
               )}
             </div>
           </div>

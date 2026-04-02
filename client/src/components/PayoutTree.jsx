@@ -1,0 +1,107 @@
+import { useState } from 'react'
+
+function PayRow({ user, bonusByUser, setBonusByUser, onPay, indent = 0 }) {
+  const key = String(user.userId)
+  const raw = bonusByUser[key]
+  const bonus = raw === undefined || raw === '' ? 0 : Number(raw)
+  const total = (Number(user.basePay) || 0) + (Number.isNaN(bonus) ? 0 : bonus)
+
+  return (
+    <div className={`payout-node payout-depth-${indent}`}>
+      <div className="payout-node-header">
+        <span className="payout-name">{user.name}</span>
+        {user.role && <span className={`badge badge-role badge-${user.role}`}>{user.role.replace(/_/g, ' ')}</span>}
+        {user.breakdown && <span className="payout-breakdown">{user.breakdown}</span>}
+      </div>
+      {user.basePay > 0 && (
+        <div className="payout-pay-row">
+          <div className="payout-amounts">
+            <span className="payout-label">Base</span>
+            <span className="payout-value">${Number(user.basePay).toFixed(2)}</span>
+          </div>
+          <div className="payout-bonus-field">
+            <label>Bonus</label>
+            <input
+              type="number"
+              step="0.01"
+              placeholder="0"
+              value={bonusByUser[key] ?? ''}
+              onChange={e => setBonusByUser(prev => ({ ...prev, [key]: e.target.value }))}
+            />
+          </div>
+          <div className="payout-amounts">
+            <span className="payout-label">Total</span>
+            <span className="payout-value payout-total">${total.toFixed(2)}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!user.address}
+            onClick={() => onPay(user)}
+          >
+            Pay
+          </button>
+          {user.address && (
+            <span className="payout-wallet">{user.address}</span>
+          )}
+          {!user.address && (
+            <span className="payout-no-wallet">No wallet</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function PayoutTree({ tree, bonusByUser, setBonusByUser, onPay, onRefresh }) {
+  const [collapsed, setCollapsed] = useState({})
+  const toggle = key => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
+
+  if (!tree.length) {
+    return (
+      <div className="payout-empty">
+        <div className="payout-empty-icon">$</div>
+        <p>No pending payouts</p>
+        <span>Reports must be confirmed by Ops Lead before they appear here.</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="payout-tree">
+      {tree.map(ops => {
+        const opsKey = String(ops.userId)
+        const opsOpen = !collapsed[opsKey]
+        return (
+          <div key={opsKey} className="payout-group payout-ops">
+            <button type="button" className="payout-toggle" onClick={() => toggle(opsKey)}>
+              <span className={`payout-chevron ${opsOpen ? 'open' : ''}`}>&#9662;</span>
+            </button>
+            <div className="payout-group-content">
+              <PayRow user={ops} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={0} />
+              {opsOpen && (ops.bidManagers || []).map(bm => {
+                const bmKey = String(bm.userId)
+                const bmOpen = !collapsed[bmKey]
+                return (
+                  <div key={bmKey} className="payout-group payout-bm">
+                    <button type="button" className="payout-toggle" onClick={() => toggle(bmKey)}>
+                      <span className={`payout-chevron ${bmOpen ? 'open' : ''}`}>&#9662;</span>
+                    </button>
+                    <div className="payout-group-content">
+                      <PayRow user={bm} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={1} />
+                      {bmOpen && (bm.bidders || []).map(bidder => (
+                        <div key={String(bidder.userId)} className="payout-group payout-bidder">
+                          <PayRow user={bidder} bonusByUser={bonusByUser} setBonusByUser={setBonusByUser} onPay={onPay} indent={2} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}

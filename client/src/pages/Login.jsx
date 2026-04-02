@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { api } from '../api'
 
-export default function Login({ onLogin }) {
-  const [mode, setMode] = useState('login') // 'login' | 'signup'
+export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
+  const [mode, setMode] = useState('login')
+  const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
-  const [role, setRole] = useState('bid_manager')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,6 +15,7 @@ export default function Login({ onLogin }) {
     e.preventDefault()
     setError('')
     setSuccess('')
+    if (onDismissBanner) onDismissBanner()
     setLoading(true)
     try {
       const { data } = await api.post('/auth/login', { email, password })
@@ -31,14 +32,15 @@ export default function Login({ onLogin }) {
     e.preventDefault()
     setError('')
     setSuccess('')
+    if (onDismissBanner) onDismissBanner()
     setLoading(true)
     try {
-      const { data } = await api.post('/auth/register', { email, password, name, role })
-      setSuccess(data.message || 'Sign up successful. Admin will approve your account soon.')
-      setEmail('')
-      setPassword('')
-      setName('')
-      setRole('bid_manager')
+      const { data } = await api.post('/auth/register', {
+        email: signupEmail,
+        password: signupPassword
+      })
+      localStorage.setItem('token', data.token)
+      onLogin(data.user)
     } catch (err) {
       setError(err.response?.data?.error || 'Sign up failed')
     } finally {
@@ -47,7 +49,7 @@ export default function Login({ onLogin }) {
   }
 
   const switchMode = () => {
-    setMode(m => m === 'login' ? 'signup' : 'login')
+    setMode(m => (m === 'login' ? 'signup' : 'login'))
     setError('')
     setSuccess('')
   }
@@ -57,8 +59,12 @@ export default function Login({ onLogin }) {
       <div className="login-card">
         <h1>Redlime Bidding</h1>
         <p className="login-subtitle">
-          {mode === 'login' ? 'Sign in with your email' : 'Create an account'}
+          {mode === 'login' ? 'Sign in with your email' : 'Create your account'}
         </p>
+
+        {bannerMessage && (
+          <p className="success-msg" style={{ marginBottom: '1rem' }}>{bannerMessage}</p>
+        )}
 
         {mode === 'login' ? (
           <form onSubmit={handleLogin} className="login-form">
@@ -84,40 +90,29 @@ export default function Login({ onLogin }) {
           </form>
         ) : (
           <form onSubmit={handleSignUp} className="login-form">
+            <p className="page-desc" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+              Start with email and password. You&apos;ll complete your profile (ID, photo, wallet) next.
+            </p>
             <input
-              type="text"
-              placeholder="Name"
-              value={name}
-              onChange={e => setName(e.target.value)}
+              type="email"
+              placeholder="Email"
+              value={signupEmail}
+              onChange={e => setSignupEmail(e.target.value)}
               required
               autoFocus
             />
             <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-            />
-            <input
               type="password"
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
+              placeholder="Password (min 6 characters)"
+              value={signupPassword}
+              onChange={e => setSignupPassword(e.target.value)}
               required
               minLength={6}
             />
-            <div className="form-row">
-              <label>Role</label>
-              <select value={role} onChange={e => setRole(e.target.value)}>
-                <option value="bid_manager">Bid Manager</option>
-                <option value="investigation_manager">Investigation Manager</option>
-              </select>
-            </div>
             {error && <p className="error-msg">{error}</p>}
             {success && <p className="success-msg">{success}</p>}
             <button type="submit" disabled={loading} className="btn btn-primary btn-block">
-              {loading ? 'Signing up...' : 'Sign Up'}
+              {loading ? 'Creating account…' : 'Continue'}
             </button>
           </form>
         )}
