@@ -314,12 +314,17 @@ router.patch('/:id/approve', authenticate, requireRole('admin'), async (req, res
   }
 });
 
-router.patch('/:id/reject', authenticate, requireRole('admin'), async (req, res) => {
+router.patch('/:id/reject', authenticate, requireRole('admin', 'ops_lead'), async (req, res) => {
   try {
     const { reason } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.status === 'approved') return res.status(400).json({ error: 'Cannot reject an approved user' });
+    if (req.user.role === 'ops_lead' && user.status !== 'pending_ops') {
+      return res.status(403).json({
+        error: 'Ops Lead can only reject applicants waiting in the Ops review queue (before they are sent to admin).'
+      });
+    }
     user.status = 'pending_onboarding';
     user.rejectionReason = reason || 'Your application was not approved.';
     user.role = 'applicant';

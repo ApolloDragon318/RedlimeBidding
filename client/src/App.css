@@ -2605,6 +2605,14 @@
   flex-shrink: 0;
 }
 
+.onboard-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  align-items: stretch;
+}
+
 .onboard-select-group {
   display: flex;
   flex-direction: column;

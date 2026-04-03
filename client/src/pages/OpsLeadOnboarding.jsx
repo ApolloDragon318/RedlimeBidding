@@ -19,6 +19,9 @@ export default function OpsLeadOnboarding() {
   const [error, setError] = useState('')
   const [savingId, setSavingId] = useState(null)
   const [selection, setSelection] = useState({})
+  const [rejectModal, setRejectModal] = useState(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -80,6 +83,31 @@ export default function OpsLeadOnboarding() {
     }
   }
 
+  const openRejectModal = (u) => {
+    setRejectModal(u)
+    setRejectReason('')
+  }
+
+  const confirmReject = async () => {
+    if (!rejectModal) return
+    if (!rejectReason.trim()) {
+      alert('Please provide a reason for rejection.')
+      return
+    }
+    setRejecting(true)
+    setError('')
+    try {
+      await api.patch(`/users/${rejectModal._id}/reject`, { reason: rejectReason.trim() })
+      setRows(prev => prev.filter(r => r._id !== rejectModal._id))
+      setRejectModal(null)
+      setRejectReason('')
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to reject')
+    } finally {
+      setRejecting(false)
+    }
+  }
+
   if (loading) return <div className="page-loading"><div className="spinner" /></div>
 
   return (
@@ -87,7 +115,7 @@ export default function OpsLeadOnboarding() {
       <div className="page-header">
         <h2>Onboarding</h2>
         <p className="page-desc">
-          Review applicants, assign role and level, then send to admin for final approval.
+          Review applicants, assign role and level, then send to admin for final approval — or reject with feedback so they can fix their application.
         </p>
       </div>
 
@@ -164,20 +192,55 @@ export default function OpsLeadOnboarding() {
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={isSaving}
-                    onClick={() => submitForApproval(u._id)}
-                  >
-                    {isSaving ? 'Sending...' : 'Send to admin'}
-                  </button>
+                  <div className="onboard-item-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={isSaving}
+                      onClick={() => submitForApproval(u._id)}
+                    >
+                      {isSaving ? 'Sending...' : 'Send to admin'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-danger"
+                      disabled={isSaving}
+                      onClick={() => openRejectModal(u)}
+                    >
+                      Reject
+                    </button>
+                  </div>
                 </div>
               )
             })}
           </div>
         )}
       </div>
+
+      {rejectModal && (
+        <div className="modal-backdrop" onClick={() => !rejecting && setRejectModal(null)}>
+          <div className="modal-pay" onClick={e => e.stopPropagation()}>
+            <h3>Reject applicant</h3>
+            <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+              <strong>{rejectModal.name}</strong> ({rejectModal.email}) will be sent back to onboarding and can resubmit after reviewing your feedback.
+            </p>
+            <label className="pending-reject-label">Reason for rejection *</label>
+            <textarea
+              className="pending-reject-textarea"
+              rows={3}
+              placeholder="Explain what needs to be corrected…"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+            />
+            <div className="modal-pay-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setRejectModal(null)} disabled={rejecting}>Cancel</button>
+              <button type="button" className="btn btn-danger" onClick={confirmReject} disabled={rejecting || !rejectReason.trim()}>
+                {rejecting ? 'Rejecting…' : 'Confirm rejection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
