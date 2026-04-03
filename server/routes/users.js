@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import User from '../models/User.js';
+import LevelRequest from '../models/LevelRequest.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import {
   OPS_ASSIGNABLE_ROLES,
@@ -405,6 +406,118 @@ router.patch('/:id/assign-bid-manager', authenticate, requireRole('admin', 'ops_
     }
     const safe = await User.findById(req.params.id).select('-password').populate('bidManagerId', 'name email');
     res.json(safe);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Ops Lead creates a level-change request for a bidder or bid manager under them */
+router.post('/level-requests', authenticate, requireRole('ops_lead'), async (req, res) => {
+  try {
+    const { userId, newLevel, reason } = req.body;
+    if (!userId || !newLevel || !reason?.trim()) {
+      return res.status(400).json({ error: 'userId, newLevel, and reason are required' });
+    }
+    if (!USER_LEVELS.includes(newLevel)) {
+      return res.status(400).json({ error: 'Invalid level' });
+    }
+    const target = await User.findById(userId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (!['bidder', 'bid_manager'].includes(target.role)) {
+      return res.status(400).json({ error: 'Level requests are only for bidders and bid managers' });
+    }
+    if (target.level === newLevel) {
+      return res.status(400).json({ error: 'New level is the same as the current level' });
+    }
+    const existing = await LevelRequest.findOne({ userId, status: 'pending' });
+    if (existing) {
+      return res.status(400).json({ error: 'A pending request already exists for this person' });
+    }
+    const lr = await LevelRequest.create({
+      userId,
+      requestedBy: req.user._id,
+      currentLevel: target.level || 'junior',
+      newLevel,
+      reason: reason.trim()
+    });
+    const populated = await LevelRequest.findById(lr._id)
+      .populate('userId', 'name email role level')
+      .populate('requestedBy', 'name');
+    res.json(populated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Ops Lead gets their own pending requests */
+router.get('/level-requests/my', authenticate, requireRole('ops_lead'), async (req, res) => {
+  try {
+    const requests = await LevelRequest.find({ requestedBy: req.user._id })
+      .populate('userId', 'name email role level')
+      .populate('requestedBy', 'name')
+      .populate('decidedBy', 'name')
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(requests);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin gets all pending level requests */
+router.get('/level-requests', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const requests = await LevelRequest.find({ status: 'pending' })
+      .populate('userId', 'name email role level')
+      .populate('requestedBy', 'name')
+      .sort({ createdAt: -1 });
+    res.json(requests);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin approves a level request — updates the user's level */
+router.patch('/level-requests/:id/approve', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const lr = await LevelRequest.findById(req.params.id);
+    if (!lr) return res.status(404).json({ error: 'Request not found' });
+    if (lr.status !== 'pending') return res.status(400).json({ error: 'Request already decided' });
+    const user = await User.findById(lr.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.level = lr.newLevel;
+    await user.save();
+    lr.status = 'approved';
+    lr.decidedBy = req.user._id;
+    lr.decidedAt = new Date();
+    await lr.save();
+    const populated = await LevelRequest.findById(lr._id)
+      .populate('userId', 'name email role level')
+      .populate('requestedBy', 'name')
+      .populate('decidedBy', 'name');
+    res.json(populated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin declines a level request */
+router.patch('/level-requests/:id/decline', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const lr = await LevelRequest.findById(req.params.id);
+    if (!lr) return res.status(404).json({ error: 'Request not found' });
+    if (lr.status !== 'pending') return res.status(400).json({ error: 'Request already decided' });
+    lr.status = 'declined';
+    lr.declineReason = reason || '';
+    lr.decidedBy = req.user._id;
+    lr.decidedAt = new Date();
+    await lr.save();
+    const populated = await LevelRequest.findById(lr._id)
+      .populate('userId', 'name email role level')
+      .populate('requestedBy', 'name')
+      .populate('decidedBy', 'name');
+    res.json(populated);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

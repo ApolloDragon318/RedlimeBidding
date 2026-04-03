@@ -46,6 +46,10 @@ export default function AdminDashboard() {
   const [rejecting, setRejecting] = useState(false)
   const [expandedApplicant, setExpandedApplicant] = useState(null)
   const [expandedSearchHit, setExpandedSearchHit] = useState(null)
+  const [levelRequests, setLevelRequests] = useState([])
+  const [lvlDeclineModal, setLvlDeclineModal] = useState(null)
+  const [lvlDeclineReason, setLvlDeclineReason] = useState('')
+  const [lvlProcessing, setLvlProcessing] = useState(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -84,13 +88,14 @@ export default function AdminDashboard() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [salaryRes, pendingRes, historyRes, opsRes, bmRes, biddersRes] = await Promise.all([
+      const [salaryRes, pendingRes, historyRes, opsRes, bmRes, biddersRes, lvlRes] = await Promise.all([
         api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } })),
         api.get('/users/pending').catch(() => ({ data: [] })),
         api.get('/salary/history').catch(() => ({ data: { personPayouts: [], legacyBatchPayouts: [] } })),
         api.get('/users/ops-leads').catch(() => ({ data: [] })),
         api.get('/users/bid-managers').catch(() => ({ data: [] })),
-        api.get('/users/bidders').catch(() => ({ data: [] }))
+        api.get('/users/bidders').catch(() => ({ data: [] })),
+        api.get('/users/level-requests').catch(() => ({ data: [] }))
       ])
       setSalaryGrid(salaryRes.data?.grid || {})
       setSalaryRoles(salaryRes.data?.roles || [])
@@ -101,6 +106,7 @@ export default function AdminDashboard() {
       setOpsLeads(opsRes.data || [])
       setBidManagersList(bmRes.data || [])
       setBiddersList(biddersRes.data || [])
+      setLevelRequests(lvlRes.data || [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -182,8 +188,6 @@ export default function AdminDashboard() {
     }
   }
 
-  const formatLevel = (l) => l ? l.replace(/_/g, ' ') : '—'
-
   const handleSalaryUpdate = (data) => {
     setSalaryGrid(data?.grid || {})
     setSalaryRoles(data?.roles || [])
@@ -235,6 +239,35 @@ export default function AdminDashboard() {
     }
   }
 
+  const formatLevel = (l) => l ? l.replace(/_/g, ' ') : '—'
+
+  const approveLevelRequest = async (id) => {
+    setLvlProcessing(id)
+    try {
+      await api.patch(`/users/level-requests/${id}/approve`)
+      setLevelRequests(prev => prev.filter(r => r._id !== id))
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to approve')
+    } finally {
+      setLvlProcessing(null)
+    }
+  }
+
+  const declineLevelRequest = async () => {
+    if (!lvlDeclineModal) return
+    setLvlProcessing(lvlDeclineModal._id)
+    try {
+      await api.patch(`/users/level-requests/${lvlDeclineModal._id}/decline`, { reason: lvlDeclineReason.trim() })
+      setLevelRequests(prev => prev.filter(r => r._id !== lvlDeclineModal._id))
+      setLvlDeclineModal(null)
+      setLvlDeclineReason('')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to decline')
+    } finally {
+      setLvlProcessing(null)
+    }
+  }
+
   if (loading) return <div className="page-loading"><div className="spinner" /></div>
 
   return (
@@ -248,6 +281,10 @@ export default function AdminDashboard() {
 
       <div className="tabs">
         <button type="button" className={activeTab === 'payouts' ? 'tab active' : 'tab'} onClick={() => setActiveTab('payouts')}>Payouts</button>
+        <button type="button" className={activeTab === 'levels' ? 'tab active' : 'tab'} onClick={() => setActiveTab('levels')}>
+          Level requests
+          {levelRequests.length > 0 && <span className="tab-badge">{levelRequests.length}</span>}
+        </button>
         <button type="button" className={activeTab === 'pending' ? 'tab active' : 'tab'} onClick={() => setActiveTab('pending')}>
           Pending Approvals {pendingUsers.length > 0 && `(${pendingUsers.length})`}
         </button>
@@ -292,6 +329,117 @@ export default function AdminDashboard() {
               taxRate={payoutTaxRate}
             />
           </div>
+        </>
+      )}
+
+      {/* ── Level Requests ── */}
+      {activeTab === 'levels' && (
+        <>
+          {levelRequests.length === 0 ? (
+            <div className="card">
+              <div className="empty-state-box">
+                <span className="empty-state-icon">↑</span>
+                <p>No pending level requests</p>
+                <span className="text-muted">Ops Leads can request level changes for their team members.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="lvl-admin-list">
+              {levelRequests.map(r => (
+                <div key={r._id} className="lvl-admin-card">
+                  <div className="lvl-admin-card-header">
+                    <div className="lvl-admin-person">
+                      <span className="lvl-admin-name">{r.userId?.name || 'User'}</span>
+                      <span className={`badge badge-role badge-${r.userId?.role}`}>
+                        {(r.userId?.role || '').replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-muted">{r.userId?.email}</span>
+                    </div>
+                    <span className="lvl-admin-date">{new Date(r.createdAt).toLocaleDateString()}</span>
+                  </div>
+
+                  <div className="lvl-admin-change">
+                    <div className="lvl-admin-level-box lvl-admin-level-from">
+                      <span className="lvl-admin-level-label">Current</span>
+                      <span className="badge badge-level">{formatLevel(r.currentLevel)}</span>
+                    </div>
+                    <span className="lvl-arrow lvl-arrow-lg">&rarr;</span>
+                    <div className="lvl-admin-level-box lvl-admin-level-to">
+                      <span className="lvl-admin-level-label">Requested</span>
+                      <span className="badge badge-level lvl-new">{formatLevel(r.newLevel)}</span>
+                    </div>
+                  </div>
+
+                  <div className="lvl-admin-reason">
+                    <span className="lvl-admin-reason-label">Reason from {r.requestedBy?.name || 'Ops Lead'}:</span>
+                    <p className="lvl-admin-reason-text">{r.reason}</p>
+                  </div>
+
+                  <div className="lvl-admin-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={lvlProcessing === r._id}
+                      onClick={() => approveLevelRequest(r._id)}
+                    >
+                      {lvlProcessing === r._id ? '...' : 'Approve'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-danger"
+                      disabled={lvlProcessing === r._id}
+                      onClick={() => { setLvlDeclineModal(r); setLvlDeclineReason('') }}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Decline modal */}
+          {lvlDeclineModal && (
+            <div className="modal-overlay" onClick={() => !lvlProcessing && setLvlDeclineModal(null)}>
+              <div className="modal modal-pay" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>Decline level request</h3>
+                  <button type="button" className="modal-close" onClick={() => setLvlDeclineModal(null)} disabled={!!lvlProcessing}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                    Declining <strong>{lvlDeclineModal.userId?.name}</strong>&apos;s promotion from{' '}
+                    <strong>{formatLevel(lvlDeclineModal.currentLevel)}</strong> to{' '}
+                    <strong>{formatLevel(lvlDeclineModal.newLevel)}</strong>.
+                  </p>
+                  <div className="form-row">
+                    <label>Reason (optional)</label>
+                    <textarea
+                      rows={3}
+                      placeholder="Explain why this request was declined..."
+                      value={lvlDeclineReason}
+                      onChange={e => setLvlDeclineReason(e.target.value)}
+                      disabled={!!lvlProcessing}
+                      className="lvl-modal-textarea"
+                    />
+                  </div>
+                  <div className="modal-actions">
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      disabled={!!lvlProcessing}
+                      onClick={declineLevelRequest}
+                    >
+                      {lvlProcessing ? 'Declining...' : 'Confirm decline'}
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => setLvlDeclineModal(null)} disabled={!!lvlProcessing}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
