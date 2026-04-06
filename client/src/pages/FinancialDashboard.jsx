@@ -26,17 +26,27 @@ export default function FinancialDashboard() {
   const [payoutDeclining, setPayoutDeclining] = useState(false)
   const [payoutConfirmingId, setPayoutConfirmingId] = useState(null)
   const [expandedPayoutReq, setExpandedPayoutReq] = useState(null)
+  const [walletChangeRequests, setWalletChangeRequests] = useState([])
+  const [walletLookupQ, setWalletLookupQ] = useState('')
+  const [walletLookupResults, setWalletLookupResults] = useState(null)
+  const [walletLookupLoading, setWalletLookupLoading] = useState(false)
+  const [walletProcessingId, setWalletProcessingId] = useState(null)
+  const [walletDeclineModal, setWalletDeclineModal] = useState(null)
+  const [walletDeclineReason, setWalletDeclineReason] = useState('')
+  const [walletDeclining, setWalletDeclining] = useState(false)
 
   const loadQueueAndHistory = useCallback(async () => {
-    const [q, h, pr, sal] = await Promise.all([
+    const [q, h, pr, sal, wr] = await Promise.all([
       api.get('/salary/payout-queue').catch(() => ({ data: { rows: [], tree: [] } })),
       api.get('/salary/history').catch(() => ({ data: { personPayouts: [], legacyBatchPayouts: [] } })),
       api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } })),
-      api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } }))
+      api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } })),
+      api.get('/users/wallet-change-requests').catch(() => ({ data: { requests: [] } }))
     ])
     setTree(q.data?.tree || [])
     setTaxRate(q.data?.taxRate ?? 0.10)
     setPayoutRequests(pr.data?.requests || [])
+    setWalletChangeRequests(wr.data?.requests || [])
     setSalaryGrid(sal.data?.grid || {})
     setSalaryRoles(sal.data?.roles || [])
     setSalaryLevels(sal.data?.levels || [])
@@ -65,6 +75,54 @@ export default function FinancialDashboard() {
       alert(err.response?.data?.error || 'Failed to confirm')
     } finally {
       setPayoutConfirmingId(null)
+    }
+  }
+
+  const searchWalletAddress = async () => {
+    const q = walletLookupQ.trim()
+    if (!q) { setWalletLookupResults(null); return }
+    setWalletLookupLoading(true)
+    setWalletLookupResults(null)
+    try {
+      const { data } = await api.get('/users/wallet-address-search', { params: { q } })
+      setWalletLookupResults(data.users || [])
+    } catch (err) {
+      alert(err.response?.data?.error || 'Lookup failed')
+    } finally {
+      setWalletLookupLoading(false)
+    }
+  }
+
+  const approveWalletRequest = async req => {
+    if (!req?._id) return
+    setWalletProcessingId(req._id)
+    try {
+      await api.patch(`/users/wallet-change-requests/${req._id}/approve`)
+      await loadQueueAndHistory()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to approve')
+    } finally {
+      setWalletProcessingId(null)
+    }
+  }
+
+  const confirmWalletDecline = async () => {
+    if (!walletDeclineModal?._id) return
+    const r = walletDeclineReason.trim()
+    if (!r) {
+      alert('Please enter a reason.')
+      return
+    }
+    setWalletDeclining(true)
+    try {
+      await api.patch(`/users/wallet-change-requests/${walletDeclineModal._id}/decline`, { reason: r })
+      setWalletDeclineModal(null)
+      setWalletDeclineReason('')
+      await loadQueueAndHistory()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to decline')
+    } finally {
+      setWalletDeclining(false)
     }
   }
 
@@ -142,6 +200,77 @@ export default function FinancialDashboard() {
 
       {tab === 'queue' && (
         <>
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div className="card-header">
+              <h3>Wallet change requests</h3>
+              <span className="card-subtitle">Approve USDT address changes. Search who already uses an address before approving.</span>
+            </div>
+            <div className="wallet-lookup-row">
+              <input
+                type="text"
+                className="wallet-lookup-input"
+                placeholder="0x… search who uses this address"
+                value={walletLookupQ}
+                onChange={e => setWalletLookupQ(e.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <button type="button" className="btn btn-ghost btn-sm" onClick={searchWalletAddress} disabled={walletLookupLoading}>
+                {walletLookupLoading ? 'Searching…' : 'Search'}
+              </button>
+            </div>
+            {walletLookupResults !== null && (
+              <div className="wallet-lookup-results">
+                {walletLookupResults.length === 0 ? (
+                  <p className="text-muted" style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>No user has this wallet on file.</p>
+                ) : (
+                  <ul className="wallet-lookup-list">
+                    {walletLookupResults.map(u => (
+                      <li key={u._id}>
+                        <strong>{u.name}</strong> <span className="text-muted">{u.email}</span>
+                        <span className="badge badge-role">{String(u.role || '').replace(/_/g, ' ')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            {walletChangeRequests.length === 0 ? (
+              <p className="payout-requests-empty">No pending wallet change requests.</p>
+            ) : (
+              <div className="wallet-req-list">
+                {walletChangeRequests.map(wr => (
+                  <div key={wr._id} className="payout-request-card">
+                    <div className="payout-request-item">
+                      <strong>{wr.userId?.name || 'User'}</strong>
+                      <span className="badge badge-role">{String(wr.userId?.role || '').replace(/_/g, ' ')}</span>
+                      <span className="text-muted">{wr.userId?.email}</span>
+                      <div className="wallet-req-detail">
+                        <span className="text-muted">From</span>{' '}
+                        <code className="mono-text">{wr.previousWallet || '—'}</code>
+                        <span className="text-muted"> → </span>
+                        <code className="mono-text">{wr.requestedWallet}</code>
+                      </div>
+                      {wr.userNote && <p className="text-muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>Note: {wr.userNote}</p>}
+                      <div className="payout-request-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => approveWalletRequest(wr)}
+                          disabled={walletProcessingId === wr._id}
+                        >
+                          {walletProcessingId === wr._id ? '…' : 'Approve'}
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => { setWalletDeclineModal(wr); setWalletDeclineReason('') }}>
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="card-header">
               <h3>Payout requests</h3>
@@ -312,6 +441,39 @@ export default function FinancialDashboard() {
         onCancel={() => { setPayConfirm(null); setPayTxId('') }}
         taxRate={taxRate}
       />
+
+      {walletDeclineModal && (
+        <div className="modal-overlay" onClick={() => !walletDeclining && setWalletDeclineModal(null)}>
+          <div className="modal modal-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Decline wallet change</h3>
+              <button type="button" className="modal-close" onClick={() => setWalletDeclineModal(null)} disabled={walletDeclining}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                Declining <strong>{walletDeclineModal.userId?.name || 'User'}</strong>&apos;s request to use{' '}
+                <code className="mono-text">{walletDeclineModal.requestedWallet}</code>.
+              </p>
+              <div className="form-row">
+                <label>Reason (required)</label>
+                <textarea
+                  rows={3}
+                  value={walletDeclineReason}
+                  onChange={e => setWalletDeclineReason(e.target.value)}
+                  disabled={walletDeclining}
+                  className="lvl-modal-textarea"
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-danger" disabled={walletDeclining} onClick={confirmWalletDecline}>
+                  {walletDeclining ? 'Declining…' : 'Decline request'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setWalletDeclineModal(null)} disabled={walletDeclining}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {payoutDeclineModal && (
         <div className="modal-overlay" onClick={() => !payoutDeclining && setPayoutDeclineModal(null)}>

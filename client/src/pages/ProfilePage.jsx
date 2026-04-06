@@ -12,7 +12,6 @@ const emptyForm = {
   nationality: '',
   country: '',
   state: '',
-  usdtErc20Wallet: '',
   currentPassword: '',
   newPassword: ''
 }
@@ -26,6 +25,12 @@ export default function ProfilePage({ onSaved }) {
   const [photoUrl, setPhotoUrl] = useState(null)
   const [photoFile, setPhotoFile] = useState(null)
   const [meta, setMeta] = useState({ email: '', role: '', level: '', name: '' })
+  const [currentWallet, setCurrentWallet] = useState('')
+  const [walletPending, setWalletPending] = useState(null)
+  const [newWalletRequest, setNewWalletRequest] = useState('')
+  const [walletUserNote, setWalletUserNote] = useState('')
+  const [walletSubmitting, setWalletSubmitting] = useState(false)
+  const [walletMsg, setWalletMsg] = useState({ error: '', success: '' })
   const photoRef = useRef(null)
 
   const loadPhoto = useCallback(() => {
@@ -66,16 +71,26 @@ export default function ProfilePage({ onSaved }) {
           address: u.address || '',
           nationality: u.nationality || '',
           country: u.country || '',
-          state: u.state || '',
-          usdtErc20Wallet: u.usdtErc20Wallet || ''
+          state: u.state || ''
         })
+        setCurrentWallet(u.usdtErc20Wallet || '')
         loadPhoto()
       })
       .catch(() => setError('Failed to load profile'))
       .finally(() => setLoading(false))
   }, [loadPhoto])
 
+  const loadWalletPending = useCallback(() => {
+    api.get('/auth/wallet-change-request/me')
+      .then(({ data }) => setWalletPending(data.pending))
+      .catch(() => setWalletPending(null))
+  }, [])
+
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    loadWalletPending()
+  }, [loadWalletPending])
 
   useEffect(() => {
     return () => {
@@ -84,6 +99,25 @@ export default function ProfilePage({ onSaved }) {
   }, [photoUrl])
 
   const setField = (key, value) => setForm(f => ({ ...f, [key]: value }))
+
+  const submitWalletChangeRequest = async () => {
+    setWalletMsg({ error: '', success: '' })
+    setWalletSubmitting(true)
+    try {
+      await api.post('/auth/wallet-change-request', {
+        requestedWallet: newWalletRequest.trim(),
+        userNote: walletUserNote.trim()
+      })
+      setWalletMsg({ error: '', success: 'Request submitted. An admin or financial manager will review it.' })
+      setNewWalletRequest('')
+      setWalletUserNote('')
+      loadWalletPending()
+    } catch (err) {
+      setWalletMsg({ error: err.response?.data?.error || 'Request failed', success: '' })
+    } finally {
+      setWalletSubmitting(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -102,7 +136,6 @@ export default function ProfilePage({ onSaved }) {
       fd.append('nationality', form.nationality)
       fd.append('country', form.country)
       fd.append('state', form.state)
-      fd.append('usdtErc20Wallet', form.usdtErc20Wallet)
       if (form.newPassword) {
         fd.append('currentPassword', form.currentPassword)
         fd.append('newPassword', form.newPassword)
@@ -114,6 +147,8 @@ export default function ProfilePage({ onSaved }) {
       setPhotoFile(null)
       setForm(f => ({ ...f, currentPassword: '', newPassword: '' }))
       loadPhoto()
+      const me = await api.get('/auth/me')
+      setCurrentWallet(me.data.user?.usdtErc20Wallet || '')
       if (onSaved) onSaved()
     } catch (err) {
       setError(err.response?.data?.error || 'Save failed')
@@ -128,7 +163,7 @@ export default function ProfilePage({ onSaved }) {
     <div className="page">
       <div className="page-header">
         <h2>My profile</h2>
-        <p className="page-desc">Manage your personal information, documents, and payout wallet.</p>
+        <p className="page-desc">Manage your personal information and documents. USDT payout wallet changes require admin or finance approval.</p>
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -230,12 +265,66 @@ export default function ProfilePage({ onSaved }) {
 
             <div className="profile-section">
               <h4 className="profile-section-title">ERC-20 payout wallet</h4>
+              <p className="text-muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                Your registered wallet cannot be edited here. Submit a change request below; it will be applied after approval.
+              </p>
               <div className="profile-fields">
                 <div className="form-row">
-                  <label>USDT wallet address</label>
-                  <input type="text" value={form.usdtErc20Wallet} onChange={e => setField('usdtErc20Wallet', e.target.value)} placeholder="0x..." spellCheck={false} autoComplete="off" />
+                  <label>Current USDT wallet</label>
+                  <code className="profile-wallet-readonly">{currentWallet || '— none on file —'}</code>
                 </div>
               </div>
+              {walletPending && (
+                <div className="profile-wallet-pending" style={{ marginTop: '0.75rem' }}>
+                  <strong>Pending change request</strong>
+                  <p className="text-muted" style={{ margin: '0.35rem 0 0', fontSize: '0.85rem' }}>
+                    Requested: <code className="mono-text">{walletPending.requestedWallet}</code>
+                    {walletPending.userNote ? <span> — {walletPending.userNote}</span> : null}
+                  </p>
+                </div>
+              )}
+              {!walletPending && (
+                <div className="profile-wallet-request" style={{ marginTop: '1rem' }}>
+                  <div className="profile-fields">
+                    <div className="form-row">
+                      <label>New wallet address</label>
+                      <input
+                        type="text"
+                        value={newWalletRequest}
+                        onChange={e => setNewWalletRequest(e.target.value)}
+                        placeholder="0x..."
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Note for reviewers (optional)</label>
+                      <input
+                        type="text"
+                        value={walletUserNote}
+                        onChange={e => setWalletUserNote(e.target.value)}
+                        placeholder="Brief context"
+                        maxLength={500}
+                      />
+                    </div>
+                  </div>
+                  {(walletMsg.error || walletMsg.success) && (
+                    <div style={{ padding: '0.5rem 0 0' }}>
+                      {walletMsg.error && <p className="error-msg">{walletMsg.error}</p>}
+                      {walletMsg.success && <p className="success-msg">{walletMsg.success}</p>}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginTop: '0.5rem' }}
+                    disabled={walletSubmitting || !newWalletRequest.trim()}
+                    onClick={submitWalletChangeRequest}
+                  >
+                    {walletSubmitting ? 'Submitting…' : 'Request wallet change'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="profile-section">

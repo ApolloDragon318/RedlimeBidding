@@ -12,6 +12,7 @@ import {
   isCloudinary,
   UPLOADS_ROOT
 } from '../middleware/uploadOnboarding.js';
+import WalletChangeRequest from '../models/WalletChangeRequest.js';
 
 const router = express.Router();
 const uploadsRootResolved = path.resolve(UPLOADS_ROOT);
@@ -229,14 +230,6 @@ router.patch('/profile', authenticate, (req, res, next) => {
     if (b.country !== undefined) user.country = str(b.country) ?? '';
     if (b.state !== undefined) user.state = str(b.state) ?? '';
 
-    if (b.usdtErc20Wallet !== undefined && b.usdtErc20Wallet !== '') {
-      const raw = normalizeErc20Address(b.usdtErc20Wallet);
-      if (!raw || !isValidErc20Address(raw)) {
-        return res.status(400).json({ error: 'Invalid ERC-20 wallet address' });
-      }
-      user.usdtErc20Wallet = raw;
-    }
-
     const files = req.files || {};
     if (files.photo?.[0]) {
       user.photoFile = {
@@ -301,6 +294,51 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user });
+});
+
+/** Request a USDT wallet change (requires admin/finance approval). Onboarding still sets initial wallet. */
+router.post('/wallet-change-request', authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.status !== 'approved') {
+      return res.status(400).json({ error: 'Only approved accounts can request a wallet change' });
+    }
+    const { requestedWallet, userNote } = req.body;
+    const raw = normalizeErc20Address(requestedWallet);
+    if (!raw || !isValidErc20Address(raw)) {
+      return res.status(400).json({ error: 'Invalid ERC-20 wallet address (0x + 40 hex characters)' });
+    }
+    const current = (user.usdtErc20Wallet || '').trim();
+    if (current && raw.toLowerCase() === current.toLowerCase()) {
+      return res.status(400).json({ error: 'New address must differ from your current wallet' });
+    }
+    const open = await WalletChangeRequest.findOne({ userId: user._id, status: 'pending' });
+    if (open) {
+      return res.status(400).json({ error: 'You already have a pending wallet change request' });
+    }
+    const doc = await WalletChangeRequest.create({
+      userId: user._id,
+      previousWallet: current || null,
+      requestedWallet: raw,
+      userNote: String(userNote || '').trim().slice(0, 2000)
+    });
+    const populated = await WalletChangeRequest.findById(doc._id).populate('userId', 'name email role');
+    res.status(201).json(populated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/wallet-change-request/me', authenticate, async (req, res) => {
+  try {
+    const pending = await WalletChangeRequest.findOne({ userId: req.user._id, status: 'pending' })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ pending: pending || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import User from '../models/User.js';
 import LevelRequest from '../models/LevelRequest.js';
+import WalletChangeRequest from '../models/WalletChangeRequest.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { isValidErc20Address, normalizeErc20Address } from '../utils/erc20Address.js';
 import {
   OPS_ASSIGNABLE_ROLES,
   ADMIN_ASSIGNABLE_ROLES,
@@ -12,6 +14,58 @@ import {
 import { UPLOADS_ROOT, isCloudinary } from '../middleware/uploadOnboarding.js';
 
 const uploadsRoot = path.resolve(UPLOADS_ROOT);
+
+function escapeRegexPattern(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Sets hasDuplicateWallet + walletDuplicateMatches on each pending user when another
+ * account in the DB uses the same ERC-20 address (case-insensitive).
+ */
+async function attachWalletDuplicateWarnings(users) {
+  const arr = Array.isArray(users) ? users : [];
+  if (arr.length === 0) return;
+  const uniqueKeys = new Set();
+  for (const u of arr) {
+    const raw = normalizeErc20Address(u.usdtErc20Wallet || '');
+    if (raw && isValidErc20Address(raw)) uniqueKeys.add(raw.toLowerCase());
+  }
+  if (uniqueKeys.size === 0) {
+    for (const u of arr) {
+      u.walletDuplicateMatches = [];
+      u.hasDuplicateWallet = false;
+    }
+    return;
+  }
+  const orClause = [...uniqueKeys].map(addr => ({
+    usdtErc20Wallet: new RegExp(`^${escapeRegexPattern(addr)}$`, 'i')
+  }));
+  const matches = await User.find({ $or: orClause })
+    .select('name email role status usdtErc20Wallet')
+    .lean();
+  const byAddr = new Map();
+  for (const d of matches) {
+    const r = normalizeErc20Address(d.usdtErc20Wallet || '');
+    if (!r) continue;
+    const key = r.toLowerCase();
+    if (!byAddr.has(key)) byAddr.set(key, []);
+    byAddr.get(key).push(d);
+  }
+  for (const u of arr) {
+    const raw = normalizeErc20Address(u.usdtErc20Wallet || '');
+    if (!raw || !isValidErc20Address(raw)) {
+      u.walletDuplicateMatches = [];
+      u.hasDuplicateWallet = false;
+      continue;
+    }
+    const key = raw.toLowerCase();
+    const sameAddr = byAddr.get(key) || [];
+    const others = sameAddr.filter(x => String(x._id) !== String(u._id));
+    u.walletDuplicateMatches = others.slice(0, 15);
+    u.hasDuplicateWallet = others.length > 0;
+  }
+}
 
 function isUrl(p) { return p && (p.startsWith('http://') || p.startsWith('https://')); }
 
@@ -205,7 +259,8 @@ router.get('/org/:id/photo', authenticate, async (req, res) => {
 /** Legacy alias — same as pending-admin */
 router.get('/pending', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const users = await User.find({ status: 'pending_admin' }).select('-password').sort({ createdAt: -1 });
+    const users = await User.find({ status: 'pending_admin' }).select('-password').sort({ createdAt: -1 }).lean();
+    await attachWalletDuplicateWarnings(users);
     res.json(users);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -214,7 +269,8 @@ router.get('/pending', authenticate, requireRole('admin'), async (req, res) => {
 
 router.get('/pending-admin', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const users = await User.find({ status: 'pending_admin' }).select('-password').sort({ createdAt: -1 });
+    const users = await User.find({ status: 'pending_admin' }).select('-password').sort({ createdAt: -1 }).lean();
+    await attachWalletDuplicateWarnings(users);
     res.json(users);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -522,6 +578,85 @@ router.patch('/level-requests/:id/decline', authenticate, requireRole('admin'), 
       .populate('userId', 'name email role level')
       .populate('requestedBy', 'name')
       .populate('decidedBy', 'name');
+    res.json(populated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin / Financial manager: find users whose saved wallet matches this address (case-insensitive) */
+router.get('/wallet-address-search', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    const q = normalizeErc20Address(req.query.q || '');
+    if (!q || !isValidErc20Address(q)) {
+      return res.status(400).json({ error: 'Enter a valid ERC-20 address (0x + 40 hex characters)' });
+    }
+    const users = await User.find({
+      usdtErc20Wallet: new RegExp(`^${escapeRegexPattern(q)}$`, 'i')
+    }).select('name email role level usdtErc20Wallet').sort({ name: 1 }).limit(50).lean();
+    res.json({ users });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin / Financial manager: pending USDT wallet change requests */
+router.get('/wallet-change-requests', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    const requests = await WalletChangeRequest.find({ status: 'pending' })
+      .populate('userId', 'name email role level')
+      .populate('decidedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ requests });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/wallet-change-requests/:id/approve', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    const wr = await WalletChangeRequest.findById(req.params.id);
+    if (!wr) return res.status(404).json({ error: 'Request not found' });
+    if (wr.status !== 'pending') return res.status(400).json({ error: 'Request already decided' });
+    const target = await User.findById(wr.userId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    const raw = normalizeErc20Address(wr.requestedWallet);
+    if (!raw || !isValidErc20Address(raw)) {
+      return res.status(400).json({ error: 'Stored request has an invalid address' });
+    }
+    target.usdtErc20Wallet = raw;
+    await target.save();
+    wr.status = 'approved';
+    wr.decidedBy = req.user._id;
+    wr.decidedAt = new Date();
+    await wr.save();
+    const populated = await WalletChangeRequest.findById(wr._id)
+      .populate('userId', 'name email role level')
+      .populate('decidedBy', 'name email');
+    res.json(populated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/wallet-change-requests/:id/decline', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({ error: 'A decline reason is required' });
+    }
+    const wr = await WalletChangeRequest.findById(req.params.id);
+    if (!wr) return res.status(404).json({ error: 'Request not found' });
+    if (wr.status !== 'pending') return res.status(400).json({ error: 'Request already decided' });
+    wr.status = 'declined';
+    wr.declineReason = String(reason).trim().slice(0, 2000);
+    wr.decidedBy = req.user._id;
+    wr.decidedAt = new Date();
+    await wr.save();
+    const populated = await WalletChangeRequest.findById(wr._id)
+      .populate('userId', 'name email role level')
+      .populate('decidedBy', 'name email');
     res.json(populated);
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -1291,6 +1291,57 @@
   padding: 0.25rem 0;
 }
 
+.profile-wallet-readonly {
+  display: block;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.wallet-lookup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.wallet-lookup-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--surface, #1a1a1f);
+  color: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.wallet-lookup-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.wallet-lookup-list li {
+  margin-bottom: 0.35rem;
+}
+
+.wallet-req-detail {
+  flex: 1 1 100%;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.wallet-req-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .payout-empty {
   text-align: center;
   padding: 3rem 1rem;
@@ -2398,6 +2449,47 @@
   gap: 0.35rem;
   flex-wrap: wrap;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.pending-wallet-dup-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(220, 53, 69, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  flex-shrink: 0;
+}
+
+.pending-wallet-dup-alert {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.pending-wallet-dup-alert strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #fca5a5;
+  font-size: 0.9rem;
+}
+
+.pending-wallet-dup-alert ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.pending-wallet-dup-alert li {
+  margin-bottom: 0.25rem;
 }
 .pending-item-docs {
   display: flex;
