@@ -1,8 +1,13 @@
+function parseBonusInput(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
 export default function PayConfirmModal({ payConfirm, adminBonus, payTxId, setPayTxId, paying, onConfirm, onCancel, taxRate = 0.10 }) {
   if (!payConfirm) return null
 
   const base = Number(payConfirm.basePay) || 0
-  const bonus = Number(adminBonus) || 0
+  const bonus = parseBonusInput(adminBonus)
   const total = base + bonus
   const tax = +(total * taxRate).toFixed(2)
   const net = +(total - tax).toFixed(2)
@@ -26,7 +31,7 @@ export default function PayConfirmModal({ payConfirm, adminBonus, payTxId, setPa
               <span className="pay-summary-value">${base.toFixed(2)}</span>
             </div>
             <div className="pay-summary-item">
-              <span className="pay-summary-label">Admin bonus</span>
+              <span className="pay-summary-label">Admin bonus (+/−)</span>
               <span className="pay-summary-value">${bonus.toFixed(2)}</span>
             </div>
             <div className="pay-summary-item">

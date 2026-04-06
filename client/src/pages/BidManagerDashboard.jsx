@@ -90,7 +90,7 @@ export default function BidManagerDashboard() {
       <div className="page-header">
         <h2>My Reports</h2>
         <p className="page-desc">
-          Review bidder work, set individual bonuses, then approve all at once. Your pay = profiles &times; rate + Ops Lead bonus.
+          Review bidder work, set bonuses per bidder report, then approve all. Your pay = profiles &times; rate + <strong>one</strong> Ops Lead bonus total (not per profile).
         </p>
         <button type="button" onClick={fetchExpectedPay} className="btn btn-ghost">Expected Pay</button>
       </div>
@@ -163,11 +163,10 @@ export default function BidManagerDashboard() {
                 </div>
                 <div className="approval-item-actions">
                   <div className="approval-bonus">
-                    <label>Bonus $</label>
+                    <label title="Can be negative">Bonus $ (+/−)</label>
                     <input
                       type="number"
                       step="0.01"
-                      min="0"
                       placeholder="0"
                       value={bonuses[r._id] ?? ''}
                       onChange={e => setBonus(r._id, e.target.value)}
@@ -240,12 +239,18 @@ export default function BidManagerDashboard() {
                   </div>
                   <p className="card-subtitle" style={{ margin: '0.75rem 0' }}>
                     {expectedPayData.formulaSummary}
+                    {expectedPayData.opsBonusTotal != null && (
+                      <span> Ops bonus total: <strong>${expectedPayData.opsBonusTotal}</strong>.</span>
+                    )}
                   </p>
                   {expectedPayData.perProfile?.length > 0 && (
                     <div className="table-wrap">
+                      <p className="text-muted" style={{ fontSize: '0.78rem', marginBottom: '0.5rem' }}>
+                        Ops bonus applies once to your pay; it appears on the first row below for clarity.
+                      </p>
                       <table className="data-table">
                         <thead>
-                          <tr><th>Profile</th><th>Week</th><th>Ops bonus</th><th>Your pay</th></tr>
+                          <tr><th>Profile</th><th>Week</th><th>Ops bonus (total)</th><th>Line</th></tr>
                         </thead>
                         <tbody>
                           {expectedPayData.perProfile.map((p, i) => (

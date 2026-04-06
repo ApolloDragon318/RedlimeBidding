@@ -1,33 +1,57 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../api'
+import SearchableCombo from '../components/SearchableCombo.jsx'
+
+function clientLabel(c) {
+  if (!c) return ''
+  return c.email ? `${c.name} · ${c.email}` : c.name
+}
 
 export default function OpsLeadProfiles() {
   const [profiles, setProfiles] = useState([])
+  const [clients, setClients] = useState([])
   const [bidders, setBidders] = useState([])
   const [bidManagers, setBidManagers] = useState([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newClientId, setNewClientId] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editName, setEditName] = useState('')
   const [assignState, setAssignState] = useState({})
 
+  const [newClientName, setNewClientName] = useState('')
+  const [newClientEmail, setNewClientEmail] = useState('')
+  const [savingClient, setSavingClient] = useState(false)
+
   const load = () => {
     return Promise.all([
       api.get('/profiles'),
       api.get('/users/bidders'),
-      api.get('/users/bid-managers')
-    ]).then(([p, b, bm]) => {
+      api.get('/users/bid-managers'),
+      api.get('/clients')
+    ]).then(([p, b, bm, c]) => {
       setProfiles(p.data)
       setBidders(b.data)
       setBidManagers(bm.data)
+      setClients(c.data)
     })
   }
 
   useEffect(() => {
     load().catch(console.error).finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    setAssignState(prev => {
+      const next = { ...prev }
+      profiles.forEach(u => {
+        if (!next[u._id]) next[u._id] = {}
+      })
+      return next
+    })
+  }, [profiles])
 
   const biddersByManager = useMemo(() => {
     const map = {}
@@ -44,14 +68,40 @@ export default function OpsLeadProfiles() {
     return map
   }, [bidders, bidManagers])
 
+  const addClient = async (e) => {
+    e.preventDefault()
+    if (!newClientName.trim()) return
+    setSavingClient(true)
+    try {
+      const { data } = await api.post('/clients', {
+        name: newClientName.trim(),
+        email: newClientEmail.trim()
+      })
+      setClients(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewClientName('')
+      setNewClientEmail('')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to add client')
+    } finally {
+      setSavingClient(false)
+    }
+  }
+
   const createProfile = async (e) => {
     e.preventDefault()
-    if (!newName.trim()) return
+    if (!newName.trim() || !newClientId) {
+      alert('Choose a client and enter a profile name.')
+      return
+    }
     setCreating(true)
     try {
-      const { data } = await api.post('/profiles', { name: newName.trim() })
+      const { data } = await api.post('/profiles', {
+        name: newName.trim(),
+        clientId: newClientId
+      })
       setProfiles(prev => [data, ...prev])
       setNewName('')
+      setNewClientId('')
       setShowCreate(false)
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create profile')
@@ -125,6 +175,8 @@ export default function OpsLeadProfiles() {
     return bm?.name || null
   }
 
+  const clientLine = (p) => clientLabel(p.clientId) || '—'
+
   if (loading) return <div className="page-loading"><div className="spinner" /></div>
 
   const assigned = profiles.filter(p => p.assignedBidderId)
@@ -135,37 +187,85 @@ export default function OpsLeadProfiles() {
       <div className="page-header">
         <h2>Profile assignment</h2>
         <p className="page-desc">
-          Create work profiles and assign bidders from your teams. Bidders choose a profile when submitting weekly reports.
+          Add clients (company + contact email in one place), then create profiles and assign bidders.
         </p>
         <button type="button" className="btn btn-primary" onClick={() => setShowCreate(s => !s)}>
           {showCreate ? 'Cancel' : '+ New profile'}
         </button>
       </div>
 
-      {/* Create form */}
+      <div className="card client-contact-card">
+        <div className="card-header">
+          <h3>Clients &amp; contacts</h3>
+          <span className="card-subtitle">Same record for the account name and contact details — search when linking a profile.</span>
+        </div>
+        <form onSubmit={addClient} className="prof-inline-form prof-inline-form-2">
+          <div className="prof-create-input-wrap">
+            <label className="prof-field-label">Company / account name</label>
+            <input
+              value={newClientName}
+              onChange={e => setNewClientName(e.target.value)}
+              placeholder="e.g. Acme Corp"
+              className="prof-create-input"
+            />
+          </div>
+          <div className="prof-create-input-wrap">
+            <label className="prof-field-label">Contact email</label>
+            <input
+              value={newClientEmail}
+              onChange={e => setNewClientEmail(e.target.value)}
+              placeholder="optional"
+              className="prof-create-input"
+              type="email"
+            />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={savingClient}>
+            {savingClient ? '…' : 'Add'}
+          </button>
+        </form>
+        {clients.length > 0 && (
+          <div className="client-im-chips">
+            {clients.map(c => (
+              <span key={c._id} className="client-chip" title={c.email || c.name}>
+                {clientLabel(c)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       {showCreate && (
         <div className="card prof-create-card">
-          <form onSubmit={createProfile} className="prof-create-form">
+          <div className="report-form-header">
+            <h3>New profile</h3>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCreate(false)}>Close</button>
+          </div>
+          <form onSubmit={createProfile} className="prof-create-form prof-create-form-stack">
+            <SearchableCombo
+              label="Client *"
+              options={clients}
+              value={newClientId}
+              onChange={setNewClientId}
+              placeholder="Type to filter by name or email…"
+              getLabel={clientLabel}
+            />
             <div className="prof-create-input-wrap">
-              <label className="prof-field-label">Profile name</label>
+              <label className="prof-field-label">Profile name *</label>
               <input
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
-                placeholder="e.g. Client A"
-                autoFocus
+                placeholder="e.g. Alpha campaign"
                 required
                 className="prof-create-input"
               />
             </div>
             <button type="submit" disabled={creating} className="btn btn-primary">
-              {creating ? 'Creating…' : 'Create'}
+              {creating ? 'Creating…' : 'Create profile'}
             </button>
-            <button type="button" className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
           </form>
         </div>
       )}
 
-      {/* Stats */}
       <div className="prof-stats">
         <div className="prof-stat">
           <span className="prof-stat-num">{profiles.length}</span>
@@ -180,17 +280,16 @@ export default function OpsLeadProfiles() {
           <span className="prof-stat-label">Unassigned</span>
         </div>
         <div className="prof-stat">
-          <span className="prof-stat-num">{bidManagers.length}</span>
-          <span className="prof-stat-label">Teams</span>
+          <span className="prof-stat-num">{clients.length}</span>
+          <span className="prof-stat-label">Clients</span>
         </div>
       </div>
 
-      {/* Profile cards */}
       {profiles.length === 0 ? (
         <div className="card">
           <div className="empty-state-box">
             <span className="empty-state-icon">📋</span>
-            <p>No profiles yet. Create one above to get started.</p>
+            <p>No profiles yet. Add a client above, then create a profile.</p>
           </div>
         </div>
       ) : (
@@ -208,7 +307,6 @@ export default function OpsLeadProfiles() {
 
             return (
               <div key={p._id} className="prof-card">
-                {/* Header with name */}
                 <div className="prof-card-header">
                   {isEditing ? (
                     <div className="prof-card-edit">
@@ -235,7 +333,11 @@ export default function OpsLeadProfiles() {
                   )}
                 </div>
 
-                {/* Owner info */}
+                <div className="prof-card-meta-block prof-card-meta-single">
+                  <span className="prof-meta-label">Client &amp; contact</span>
+                  <span className="prof-meta-value">{clientLine(p)}</span>
+                </div>
+
                 <div className="prof-card-owner">
                   {ownerName ? (
                     <>
@@ -253,7 +355,6 @@ export default function OpsLeadProfiles() {
                   )}
                 </div>
 
-                {/* Assign selects */}
                 <div className="prof-card-assign">
                   <div className="prof-card-select-row">
                     <label className="prof-field-label">Team (Bid Manager)</label>
@@ -288,7 +389,6 @@ export default function OpsLeadProfiles() {
                   )}
                 </div>
 
-                {/* Footer */}
                 <div className="prof-card-footer">
                   <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => remove(p._id)}>Delete</button>
                 </div>

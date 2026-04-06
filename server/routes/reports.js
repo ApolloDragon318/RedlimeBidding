@@ -2,6 +2,7 @@ import express from 'express';
 import Report, { WORKFLOW } from '../models/Report.js';
 import User from '../models/User.js';
 import ImProfile from '../models/ImProfile.js';
+import PayoutRequest from '../models/PayoutRequest.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -189,7 +190,7 @@ router.patch('/:id/decline-bid-manager', authenticate, requireRole('bid_manager'
   }
 });
 
-/** Approve ALL reports from all bid teams under this Ops Lead — each BM gets its own bonus via bonuses map */
+/** Approve ALL reports from all bid teams under this Ops Lead — each BM gets one total Ops bonus (not per profile). */
 router.post('/ops-lead/approve-all', authenticate, requireRole('ops_lead'), async (req, res) => {
   try {
     const { bonuses } = req.body;
@@ -200,21 +201,41 @@ router.post('/ops-lead/approve-all', authenticate, requireRole('ops_lead'), asyn
     const reports = await Report.find({
       bidManagerId: { $in: bmIds },
       workflowStatus: WORKFLOW.AWAITING_OPS_LEAD
-    });
+    }).sort({ createdAt: 1 });
     if (reports.length === 0) {
       return res.status(400).json({ error: 'No reports awaiting your approval' });
     }
     const ids = [];
+    const bonusAppliedForBm = new Set();
     for (const report of reports) {
       const bmId = report.bidManagerId.toString();
       const raw = bonusMap[bmId];
-      report.opsLeadTeamBonus = raw != null && !Number.isNaN(Number(raw)) ? Number(raw) : 0;
+      const bonusVal = raw != null && !Number.isNaN(Number(raw)) ? Number(raw) : 0;
+      /** Total bonus for the bid manager — store on the first report only; others 0 (pay math sums profile rates + one bonus). */
+      if (!bonusAppliedForBm.has(bmId)) {
+        report.opsLeadTeamBonus = bonusVal;
+        bonusAppliedForBm.add(bmId);
+      } else {
+        report.opsLeadTeamBonus = 0;
+      }
       report.workflowStatus = WORKFLOW.CONFIRMED;
       report.opsLeadApprovedAt = new Date();
       report.opsLeadApprovedBy = req.user._id;
       await report.save();
       ids.push(report._id);
     }
+    const existing = await PayoutRequest.findOne({
+      userId: req.user._id,
+      status: { $in: ['pending', 'confirmed'] }
+    });
+    if (!existing) {
+      await PayoutRequest.create({
+        userId: req.user._id,
+        role: 'ops_lead',
+        status: 'pending'
+      });
+    }
+
     const populated = await populateReport(Report.find({ _id: { $in: ids } }));
     res.json({ count: populated.length, reports: populated });
   } catch (e) {

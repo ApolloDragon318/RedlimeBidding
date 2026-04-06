@@ -3,7 +3,7 @@ import { api } from '../api'
 
 const ROLE_LABELS = { bidder: 'Bidder', bid_manager: 'Bid Manager', ops_lead: 'Ops Lead' }
 const LEVEL_LABELS = { junior: 'Junior', mid_level: 'Mid-level', senior: 'Senior', staff: 'Staff' }
-const RATE_UNITS = { bidder: '$ / bid', bid_manager: '$ / profile', ops_lead: '$ / person' }
+const RATE_UNITS = { bidder: '$ / bid', bid_manager: '$ / profile', ops_lead: '$ / profile' }
 
 export default function SalaryRateGrid({ grid, roles, levels, onUpdate }) {
   const [editing, setEditing] = useState(null)
@@ -55,11 +55,11 @@ export default function SalaryRateGrid({ grid, roles, levels, onUpdate }) {
         </div>
         <div className="rate-formula">
           <span className="rate-formula-role">Bid Manager</span>
-          <span>profiles &times; rate + Ops bonus</span>
+          <span>profiles &times; rate + one Ops bonus total</span>
         </div>
         <div className="rate-formula">
           <span className="rate-formula-role">Ops Lead</span>
-          <span>people &times; rate + admin bonus</span>
+          <span>profiles &times; rate + admin bonus</span>
         </div>
       </div>
 

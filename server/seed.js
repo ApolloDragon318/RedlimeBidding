@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import User from './models/User.js';
 import SalaryConfig from './models/SalaryConfig.js';
 import ImProfile from './models/ImProfile.js';
+import Client from './models/Client.js';
 import Report from './models/Report.js';
 
 dotenv.config();
@@ -22,6 +23,7 @@ async function seed() {
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-bidding');
   await Report.deleteMany({});
   await ImProfile.deleteMany({});
+  await Client.deleteMany({});
   await User.deleteMany({});
   await SalaryConfig.deleteMany({});
 
@@ -124,10 +126,31 @@ async function seed() {
   await User.updateOne({ _id: bidder1._id }, { $set: { bidManagerId: bm1._id } });
   await User.updateOne({ _id: bidder2._id }, { $set: { bidManagerId: bm2._id } });
 
+  const demoClient = await Client.create({
+    name: 'Acme Corp',
+    email: 'contact@acme.example',
+    opsLeadId: opsLead._id
+  });
+
   await ImProfile.create([
-    { opsLeadId: opsLead._id, name: 'Alpha Profile', assignedBidderId: bidder1._id },
-    { opsLeadId: opsLead._id, name: 'Gamma Profile', assignedBidderId: bidder1._id },
-    { opsLeadId: opsLead._id, name: 'Beta Profile', assignedBidderId: bidder2._id }
+    {
+      opsLeadId: opsLead._id,
+      clientId: demoClient._id,
+      name: 'Alpha Profile',
+      assignedBidderId: bidder1._id
+    },
+    {
+      opsLeadId: opsLead._id,
+      clientId: demoClient._id,
+      name: 'Gamma Profile',
+      assignedBidderId: bidder1._id
+    },
+    {
+      opsLeadId: opsLead._id,
+      clientId: demoClient._id,
+      name: 'Beta Profile',
+      assignedBidderId: bidder2._id
+    }
   ]);
 
   await SalaryConfig.insertMany([

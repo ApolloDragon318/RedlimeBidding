@@ -3,6 +3,8 @@ import { api } from '../api'
 import PayoutTree from '../components/PayoutTree'
 import PayConfirmModal from '../components/PayConfirmModal'
 import SalaryRateGrid from '../components/SalaryRateGrid'
+import ClientPayoutTable from '../components/ClientPayoutTable'
+import AdminClientsProfiles from './AdminClientsProfiles'
 
 const ADMIN_DIRECT_ROLES = [
   { value: 'ops_lead', label: 'Ops Lead' },
@@ -50,6 +52,13 @@ export default function AdminDashboard() {
   const [lvlDeclineModal, setLvlDeclineModal] = useState(null)
   const [lvlDeclineReason, setLvlDeclineReason] = useState('')
   const [lvlProcessing, setLvlProcessing] = useState(null)
+  const [clientPayoutData, setClientPayoutData] = useState(null)
+  const [clientTableLoading, setClientTableLoading] = useState(false)
+  const [payoutDeclineModal, setPayoutDeclineModal] = useState(null)
+  const [payoutDeclineReason, setPayoutDeclineReason] = useState('')
+  const [payoutDeclining, setPayoutDeclining] = useState(false)
+  const [payoutConfirmingId, setPayoutConfirmingId] = useState(null)
+  const [expandedPayoutReq, setExpandedPayoutReq] = useState(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -84,6 +93,43 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === 'payouts') fetchPayoutQueue()
   }, [activeTab, fetchPayoutQueue])
+
+  const openPayoutDecline = req => {
+    setPayoutDeclineModal(req)
+    setPayoutDeclineReason('')
+  }
+
+  const confirmPayoutRequest = async req => {
+    if (!req?._id) return
+    setPayoutConfirmingId(req._id)
+    try {
+      await api.post(`/salary/payout-requests/${req._id}/confirm`)
+      await fetchPayoutQueue()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to confirm')
+    } finally {
+      setPayoutConfirmingId(null)
+    }
+  }
+
+  const confirmPayoutDecline = async () => {
+    if (!payoutDeclineModal?._id) return
+    const r = payoutDeclineReason.trim()
+    if (!r) {
+      alert('Please enter a reason for declining this request.')
+      return
+    }
+    setPayoutDeclining(true)
+    try {
+      await api.post(`/salary/payout-requests/${payoutDeclineModal._id}/decline`, { reason: r })
+      setPayoutDeclineModal(null)
+      await fetchPayoutQueue()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to decline')
+    } finally {
+      setPayoutDeclining(false)
+    }
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -224,7 +270,8 @@ export default function AdminDashboard() {
     if (!tx) { alert('Enter the TxID (transaction reference) for this payment.'); return }
     setPaying(true)
     try {
-      const bonus = Number(adminBonusByUser[String(payConfirm.userId)]) || 0
+      const rawB = Number(adminBonusByUser[String(payConfirm.userId)])
+      const bonus = Number.isFinite(rawB) ? rawB : 0
       await api.post(`/salary/pay/${payConfirm.userId}`, { adminBonus: bonus, txId: tx })
       setPayConfirm(null)
       setPayTxId('')
@@ -253,6 +300,23 @@ export default function AdminDashboard() {
     }
   }
 
+  const generateClientTable = async () => {
+    setClientTableLoading(true)
+    try {
+      const bonusMap = {}
+      for (const [uid, val] of Object.entries(adminBonusByUser)) {
+        const n = Number(val)
+        if (Number.isFinite(n) && n !== 0) bonusMap[uid] = n
+      }
+      const { data } = await api.post('/salary/client-payout-table', { adminBonuses: bonusMap })
+      setClientPayoutData(data)
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to generate table')
+    } finally {
+      setClientTableLoading(false)
+    }
+  }
+
   const declineLevelRequest = async () => {
     if (!lvlDeclineModal) return
     setLvlProcessing(lvlDeclineModal._id)
@@ -275,12 +339,13 @@ export default function AdminDashboard() {
       <div className="page-header">
         <h2>Admin Dashboard</h2>
         <p className="page-desc">
-          Bidder pay = bids &times; rate + BM bonus. BM pay = profiles &times; rate + Ops bonus. Ops pay = people &times; rate.
+          Bidder pay = bids &times; rate + BM bonus. BM pay = profiles &times; rate + <strong>one</strong> Ops bonus total per BM. Ops pay = profiles &times; rate.
         </p>
       </div>
 
       <div className="tabs">
         <button type="button" className={activeTab === 'payouts' ? 'tab active' : 'tab'} onClick={() => setActiveTab('payouts')}>Payouts</button>
+        <button type="button" className={activeTab === 'clients' ? 'tab active' : 'tab'} onClick={() => setActiveTab('clients')}>Clients &amp; profiles</button>
         <button type="button" className={activeTab === 'levels' ? 'tab active' : 'tab'} onClick={() => setActiveTab('levels')}>
           Level requests
           {levelRequests.length > 0 && <span className="tab-badge">{levelRequests.length}</span>}
@@ -296,29 +361,89 @@ export default function AdminDashboard() {
       {/* ── Payouts ── */}
       {activeTab === 'payouts' && (
         <>
-          {payoutRequests.length > 0 && (
-            <div className="card" style={{ marginBottom: '1rem' }}>
-              <div className="card-header">
-                <h3>Payout requests</h3>
-                <span className="card-subtitle">Users asked for payment — find them below and pay with TxID.</span>
-              </div>
-              <div className="payout-requests-list">
-                {payoutRequests.map(req => (
-                  <div key={req._id} className="payout-request-item">
-                    <strong>{req.userId?.name || 'User'}</strong>
-                    <span className="badge badge-role badge-pending">{String(req.role || '').replace(/_/g, ' ')}</span>
-                    <span className="text-muted">{req.userId?.email}</span>
-                    <span className="payout-request-time">{new Date(req.createdAt).toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div className="card-header">
+              <h3>Payout requests</h3>
+              <span className="card-subtitle">
+                <strong>Confirm</strong> after review — only then can they be paid in the tree below. <strong>Decline</strong> sends feedback so they can request again.
+              </span>
             </div>
-          )}
+            {payoutRequests.length === 0 ? (
+              <p className="payout-requests-empty">No open payout requests right now.</p>
+            ) : (
+              <div className="payout-requests-list">
+                {payoutRequests.map(req => {
+                  const isOpen = expandedPayoutReq === req._id
+                  return (
+                    <div key={req._id} className="payout-request-card">
+                      <div className="payout-request-item">
+                        <strong>{req.userId?.name || 'User'}</strong>
+                        <span className="badge badge-role">{String(req.role || '').replace(/_/g, ' ')}</span>
+                        <span className={`badge ${req.status === 'confirmed' ? 'badge-approved' : 'badge-pending'}`}>
+                          {req.status === 'confirmed' ? 'Approved — ready to pay' : 'Awaiting confirmation'}
+                        </span>
+                        <span className="text-muted">{req.userId?.email}</span>
+                        {req.teamBreakdown?.length > 0 && (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExpandedPayoutReq(isOpen ? null : req._id)}>
+                            {isOpen ? 'Hide team' : 'Show team'}
+                          </button>
+                        )}
+                        <div className="payout-request-actions">
+                          {req.status === 'pending' && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                onClick={() => confirmPayoutRequest(req)}
+                                disabled={payoutConfirmingId === req._id}
+                              >
+                                {payoutConfirmingId === req._id ? '…' : 'Confirm'}
+                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => openPayoutDecline(req)}>
+                                Decline
+                              </button>
+                            </>
+                          )}
+                          <span className="payout-request-time">{new Date(req.createdAt).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      {isOpen && req.teamBreakdown && (
+                        <div className="pr-team-breakdown">
+                          {req.teamBreakdown.map((bm, i) => (
+                            <div key={i} className="pr-team-bm">
+                              <div className="pr-team-bm-header">
+                                <strong>{bm.bmName}</strong>
+                                <span className="badge badge-role badge-bid_manager">bid manager</span>
+                                <span className="text-muted">{bm.profileCount} profile(s) × ${bm.profileRate} + ${bm.opsBonusTotal} Ops bonus</span>
+                              </div>
+                              {bm.bidders.length > 0 && (
+                                <div className="pr-team-bidders">
+                                  {bm.bidders.map((b, j) => (
+                                    <div key={j} className="pr-team-bidder-row">
+                                      <span className="pr-team-bidder-name">{b.name}</span>
+                                      <span className="pr-team-chip">{b.totalBidCount} bids</span>
+                                      <span className="pr-team-chip">× ${b.bidderRate}/bid</span>
+                                      <span className="pr-team-chip">BM bonus ${b.bmBonusTotal.toFixed(2)}</span>
+                                      <span className="text-muted">{b.reportCount} report(s)</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           <div className="card">
             <div className="card-header">
               <h3>Payouts</h3>
               <button type="button" className="btn btn-ghost btn-sm" onClick={fetchPayoutQueue}>Refresh</button>
-              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Only confirmed reports appear here (after Ops Lead approves all).</span>
+              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Confirmed payout requests appear here. Ops Lead must request → you confirm → then pay.</span>
             </div>
             <PayoutTree
               tree={payoutTree}
@@ -327,10 +452,31 @@ export default function AdminDashboard() {
               onPay={user => setPayConfirm(user)}
               onRefresh={fetchPayoutQueue}
               taxRate={payoutTaxRate}
+              payoutRequests={payoutRequests}
             />
+          </div>
+
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <div className="card-header">
+              <h3>Client cost table</h3>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={generateClientTable}
+                disabled={clientTableLoading}
+              >
+                {clientTableLoading ? 'Generating…' : 'Generate table'}
+              </button>
+              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>
+                Per-profile costs and merged client totals for pending payouts.
+              </span>
+            </div>
+            {clientPayoutData && <ClientPayoutTable data={clientPayoutData} />}
           </div>
         </>
       )}
+
+      {activeTab === 'clients' && <AdminClientsProfiles />}
 
       {/* ── Level Requests ── */}
       {activeTab === 'levels' && (
@@ -828,6 +974,46 @@ export default function AdminDashboard() {
         onCancel={() => { setPayConfirm(null); setPayTxId('') }}
         taxRate={payoutTaxRate}
       />
+
+      {payoutDeclineModal && (
+        <div className="modal-overlay" onClick={() => !payoutDeclining && setPayoutDeclineModal(null)}>
+          <div className="modal modal-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Decline payout request</h3>
+              <button type="button" className="modal-close" onClick={() => setPayoutDeclineModal(null)} disabled={payoutDeclining}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                Declining <strong>{payoutDeclineModal.userId?.name || 'User'}</strong>&apos;s payment request. They will see your reason and can submit a new request after fixing the issue.
+              </p>
+              <div className="form-row">
+                <label>Reason (required)</label>
+                <textarea
+                  rows={4}
+                  placeholder="Explain what needs to be corrected…"
+                  value={payoutDeclineReason}
+                  onChange={e => setPayoutDeclineReason(e.target.value)}
+                  disabled={payoutDeclining}
+                  className="lvl-modal-textarea"
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={payoutDeclining}
+                  onClick={confirmPayoutDecline}
+                >
+                  {payoutDeclining ? 'Declining…' : 'Decline request'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setPayoutDeclineModal(null)} disabled={payoutDeclining}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

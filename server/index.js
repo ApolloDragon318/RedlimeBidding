@@ -8,6 +8,9 @@ import reportRoutes from './routes/reports.js';
 import userRoutes from './routes/users.js';
 import salaryRoutes from './routes/salary.js';
 import profileRoutes from './routes/profiles.js';
+import clientRoutes from './routes/clients.js';
+import Client from './models/Client.js';
+import ImProfile from './models/ImProfile.js';
 
 dotenv.config();
 
@@ -45,6 +48,71 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
         await db.collection('salaryconfigs').dropIndex('bidManagerId_1');
         console.log('Dropped legacy bidManagerId_1 index from salaryconfigs');
       } catch (_) { /* index already gone */ }
+
+      try {
+        await db.collection('improfiles').dropIndex('opsLeadId_1_name_1');
+        console.log('Dropped legacy opsLeadId_1_name_1 index from improfiles');
+      } catch (_) { /* index already gone */ }
+
+      /** Merge legacy InvestigationManager docs into Client (same business context), then remove IM collection. */
+      try {
+        const imCol = db.collection('investigationmanagers');
+        const profCol = db.collection('improfiles');
+        const imCount = await imCol.countDocuments();
+        if (imCount > 0) {
+          const ims = await imCol.find({}).toArray();
+          for (const im of ims) {
+            const oid = im.opsLeadId;
+            const existing = await Client.findOne({ opsLeadId: oid, name: im.name });
+            if (existing) {
+              if (im.email && !existing.email) {
+                existing.email = im.email;
+                await existing.save();
+              }
+            } else {
+              await Client.create({
+                name: im.name,
+                email: (im.email || '').trim(),
+                opsLeadId: oid
+              });
+            }
+          }
+          const profsWithIm = await profCol.find({ investigationManagerId: { $exists: true, $ne: null } }).toArray();
+          for (const raw of profsWithIm) {
+            const im = await imCol.findOne({ _id: raw.investigationManagerId });
+            if (im && raw.clientId) {
+              const cli = await Client.findById(raw.clientId);
+              if (cli && im.email && !cli.email) {
+                cli.email = im.email;
+                await cli.save();
+              }
+            }
+          }
+          await profCol.updateMany({}, { $unset: { investigationManagerId: '' } });
+          await imCol.drop();
+          console.log(`Merged ${imCount} investigation manager record(s) into clients and removed collection`);
+        }
+      } catch (e) {
+        console.warn('Investigation manager migration (optional):', e.message);
+      }
+
+      const legacyProfiles = await ImProfile.find({
+        $or: [
+          { clientId: { $exists: false } },
+          { clientId: null }
+        ]
+      });
+      for (const p of legacyProfiles) {
+        let client = await Client.findOne({ opsLeadId: p.opsLeadId, name: 'Legacy client' });
+        if (!client) {
+          client = await Client.create({ name: 'Legacy client', email: '', opsLeadId: p.opsLeadId });
+        }
+        p.clientId = client._id;
+        await p.save();
+      }
+      if (legacyProfiles.length > 0) {
+        console.log(`Migrated ${legacyProfiles.length} profile(s) with default client`);
+      }
     }
   })
   .catch(err => console.error('MongoDB error:', err));
@@ -54,6 +122,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/salary', salaryRoutes);
 app.use('/api/profiles', profileRoutes);
+app.use('/api/clients', clientRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

@@ -9,15 +9,28 @@ export default function OpsLeadPaymentRequests() {
   const [expectedOps, setExpectedOps] = useState(null)
   const [approving, setApproving] = useState(false)
   const [showExpected, setShowExpected] = useState(false)
+  const [payoutMe, setPayoutMe] = useState(null)
+  const [requestingPayout, setRequestingPayout] = useState(false)
+
+  const loadPayoutMe = async () => {
+    try {
+      const { data } = await api.get('/salary/payout-request/me')
+      setPayoutMe(data)
+    } catch {
+      setPayoutMe(null)
+    }
+  }
 
   useEffect(() => {
     Promise.all([
       api.get('/reports'),
-      api.get('/salary/expected-pay-ops-lead').catch(() => ({ data: null }))
+      api.get('/salary/expected-pay-ops-lead').catch(() => ({ data: null })),
+      api.get('/salary/payout-request/me').catch(() => ({ data: null }))
     ])
-      .then(([r, ex]) => {
+      .then(([r, ex, me]) => {
         setReports(r.data)
         setExpectedOps(ex.data)
+        setPayoutMe(me.data || null)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -49,6 +62,26 @@ export default function OpsLeadPaymentRequests() {
     return m
   }, [other])
 
+  const canRequestPayout = useMemo(() => {
+    if (!expectedOps) return false
+    const raw = expectedOps.netPay ?? expectedOps.basePay ?? '0'
+    const n = parseFloat(String(raw))
+    return !Number.isNaN(n) && n > 0
+  }, [expectedOps])
+
+  const requestPayout = async () => {
+    setRequestingPayout(true)
+    try {
+      await api.post('/salary/request-payout')
+      await loadPayoutMe()
+      alert('Payment request submitted.')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Could not submit request')
+    } finally {
+      setRequestingPayout(false)
+    }
+  }
+
   const approveAll = async () => {
     const bonusMap = {}
     for (const bmId of Object.keys(byBm)) {
@@ -67,6 +100,7 @@ export default function OpsLeadPaymentRequests() {
       setReports(data)
       const ex = await api.get('/salary/expected-pay-ops-lead').catch(() => ({ data: null }))
       setExpectedOps(ex.data)
+      await loadPayoutMe()
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to approve')
     } finally {
@@ -93,7 +127,7 @@ export default function OpsLeadPaymentRequests() {
       <div className="page-header">
         <h2>Payment requests</h2>
         <p className="page-desc">
-          Set a bonus per bid manager, then approve all. Decline sends the whole team back to their BM.
+          Enter <strong>one total</strong> bonus per bid manager for this approval (not multiplied by profiles). Approve all when ready. Decline sends the whole team back to their BM.
         </p>
         {expectedOps && (
           <button type="button" className="btn btn-ghost" onClick={() => setShowExpected(s => !s)}>
@@ -101,6 +135,54 @@ export default function OpsLeadPaymentRequests() {
           </button>
         )}
       </div>
+
+      {payoutMe?.lastDeclined && !payoutMe?.pending && (
+        <div className="card payout-decline-banner">
+          <h4>Your last payment request was declined</h4>
+          <p className="payout-decline-reason">{payoutMe.lastDeclined.reason}</p>
+          {payoutMe.lastDeclined.declinedAt && (
+            <p className="text-muted" style={{ fontSize: '0.8rem', margin: '0.5rem 0 0' }}>
+              {new Date(payoutMe.lastDeclined.declinedAt).toLocaleString()}
+            </p>
+          )}
+          <p className="text-muted" style={{ margin: '0.75rem 0 0' }}>
+            Address the feedback below, then submit a new request when you have eligible pay.
+          </p>
+        </div>
+      )}
+
+      {payoutMe?.pending && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <p className="payout-pending-note">
+            {payoutMe.pending.status === 'confirmed' ? (
+              <>
+                Your payment request is <strong>approved</strong>. Admin or Financial can record payment from their <strong>Payouts</strong> queue.
+              </>
+            ) : (
+              <>
+                Your request is <strong>waiting for Admin/Financial to confirm</strong>. They must confirm it in <strong>Payout requests</strong> before they can pay you.
+              </>
+            )}
+          </p>
+        </div>
+      )}
+
+      {canRequestPayout && !payoutMe?.pending && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div className="card-header">
+            <h3>Request payment</h3>
+            <span className="card-subtitle">Notify Admin or Financial that you&apos;re ready for your Ops payout.</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={requestPayout}
+            disabled={requestingPayout}
+          >
+            {requestingPayout ? 'Submitting…' : 'Request payment'}
+          </button>
+        </div>
+      )}
 
       {/* ── Summary stats ── */}
       <div className="card">
@@ -123,7 +205,7 @@ export default function OpsLeadPaymentRequests() {
           {expectedOps && (
             <div className="stat-block">
               <span className="stat-value" style={{ color: 'var(--accent)' }}>${expectedOps.basePay}</span>
-              <span className="stat-label">{expectedOps.peopleCount} people &times; ${expectedOps.opsRate}</span>
+              <span className="stat-label">{expectedOps.profileCount} profile(s) &times; ${expectedOps.opsRate}</span>
             </div>
           )}
         </div>
@@ -138,8 +220,8 @@ export default function OpsLeadPaymentRequests() {
           </div>
           <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
             <div className="pay-summary-item">
-              <span className="pay-summary-label">People</span>
-              <span className="pay-summary-value">{expectedOps.peopleCount}</span>
+              <span className="pay-summary-label">Profiles</span>
+              <span className="pay-summary-value">{expectedOps.profileCount}</span>
             </div>
             <div className="pay-summary-item">
               <span className="pay-summary-label">Rate</span>
@@ -196,11 +278,10 @@ export default function OpsLeadPaymentRequests() {
                   </div>
                   <div className="ops-team-header-actions">
                     <div className="approval-bonus">
-                      <label>Bonus $</label>
+                      <label title="Total for this bid manager, not per profile; can be negative">Total bonus $ (+/−)</label>
                       <input
                         type="number"
                         step="0.01"
-                        min="0"
                         placeholder="0"
                         value={bmBonuses[bmId] ?? ''}
                         onChange={e => setBmBonuses(prev => ({ ...prev, [bmId]: e.target.value }))}
