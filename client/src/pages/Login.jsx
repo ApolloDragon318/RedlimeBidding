@@ -153,6 +153,25 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
               {loading ? 'Creating account…' : 'Continue'}
             </button>
           </form>
+        ) : mode === 'forgot' ? (
+          <form onSubmit={handleForgotPassword} className="login-form">
+            <p className="page-desc" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+              Enter your email address. An administrator will approve the reset — after that, sign in with the default password <strong>12345678</strong>.
+            </p>
+            <input
+              type="email"
+              placeholder="Your email address"
+              value={forgotEmail}
+              onChange={e => setForgotEmail(e.target.value)}
+              required
+              autoFocus
+            />
+            {error && <p className="error-msg">{error}</p>}
+            {success && <p className="success-msg">{success}</p>}
+            <button type="submit" disabled={loading} className="btn btn-primary btn-block">
+              {loading ? 'Submitting…' : 'Request password reset'}
+            </button>
+          </form>
         ) : (
           <form onSubmit={handleSignUpClient} className="login-form">
             <p className="page-desc" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
@@ -190,27 +209,6 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
             {error && <p className="error-msg">{error}</p>}
             <button type="submit" disabled={loading} className="btn btn-primary btn-block">
               {loading ? 'Creating account…' : 'Create client account'}
-            </button>
-          </form>
-        )}
-
-        {mode === 'forgot' && (
-          <form onSubmit={handleForgotPassword} className="login-form">
-            <p className="page-desc" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-              Enter your email address. An administrator will approve the reset — after that, sign in with the default password <strong>12345678</strong>.
-            </p>
-            <input
-              type="email"
-              placeholder="Your email address"
-              value={forgotEmail}
-              onChange={e => setForgotEmail(e.target.value)}
-              required
-              autoFocus
-            />
-            {error && <p className="error-msg">{error}</p>}
-            {success && <p className="success-msg">{success}</p>}
-            <button type="submit" disabled={loading} className="btn btn-primary btn-block">
-              {loading ? 'Submitting…' : 'Request password reset'}
             </button>
           </form>
         )}
