@@ -12,6 +12,7 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -72,6 +73,22 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
     }
   }
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    if (onDismissBanner) onDismissBanner()
+    setLoading(true)
+    try {
+      const { data } = await api.post('/auth/forgot-password', { email: forgotEmail })
+      setSuccess(data.message || 'Request submitted.')
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to submit request')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="login-page">
       <div className="login-card">
@@ -80,6 +97,7 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
           {mode === 'login' && 'Sign in with your email'}
           {mode === 'signup' && 'Applicant / ops team track'}
           {mode === 'signup-client' && 'Client organization'}
+          {mode === 'forgot' && 'Reset your password'}
         </p>
 
         {bannerMessage && (
@@ -176,18 +194,42 @@ export default function Login({ onLogin, bannerMessage, onDismissBanner }) {
           </form>
         )}
 
+        {mode === 'forgot' && (
+          <form onSubmit={handleForgotPassword} className="login-form">
+            <p className="page-desc" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+              Enter your email address. An administrator will approve the reset — after that, sign in with the default password <strong>12345678</strong>.
+            </p>
+            <input
+              type="email"
+              placeholder="Your email address"
+              value={forgotEmail}
+              onChange={e => setForgotEmail(e.target.value)}
+              required
+              autoFocus
+            />
+            {error && <p className="error-msg">{error}</p>}
+            {success && <p className="success-msg">{success}</p>}
+            <button type="submit" disabled={loading} className="btn btn-primary btn-block">
+              {loading ? 'Submitting…' : 'Request password reset'}
+            </button>
+          </form>
+        )}
+
         {mode === 'login' && (
           <>
-            <button type="button" className="btn btn-ghost btn-block btn-switch" style={{ marginTop: '0.75rem' }} onClick={() => { setMode('signup'); setError('') }}>
+            <button type="button" className="btn btn-ghost btn-block btn-switch" style={{ marginTop: '0.75rem' }} onClick={() => { setMode('forgot'); setError(''); setSuccess('') }}>
+              Forgot password?
+            </button>
+            <button type="button" className="btn btn-ghost btn-block btn-switch" onClick={() => { setMode('signup'); setError(''); setSuccess('') }}>
               Sign up — applicant / ops team
             </button>
-            <button type="button" className="btn btn-ghost btn-block btn-switch" onClick={() => { setMode('signup-client'); setError('') }}>
+            <button type="button" className="btn btn-ghost btn-block btn-switch" onClick={() => { setMode('signup-client'); setError(''); setSuccess('') }}>
               Sign up — client organization
             </button>
           </>
         )}
         {mode !== 'login' && (
-          <button type="button" className="btn btn-ghost btn-block btn-switch" onClick={() => { setMode('login'); setError('') }}>
+          <button type="button" className="btn btn-ghost btn-block btn-switch" onClick={() => { setMode('login'); setError(''); setSuccess('') }}>
             Back to sign in
           </button>
         )}

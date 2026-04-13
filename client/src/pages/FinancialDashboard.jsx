@@ -264,7 +264,7 @@ export default function FinancialDashboard() {
                 {clientTableLoading ? 'Generating…' : 'Generate table'}
               </button>
               <span className="card-subtitle" style={{ flex: '1 1 100%' }}>
-                Per-profile costs and merged client totals for pending payouts.
+                Internal clients only — per-profile costs and merged client totals for pending payouts.
               </span>
             </div>
             {clientPayoutData && <ClientPayoutTable data={clientPayoutData} />}

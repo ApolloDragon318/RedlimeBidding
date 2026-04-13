@@ -21,9 +21,6 @@ export default function AdminClientsProfiles({ isOpsLead = false } = {}) {
   const [editName, setEditName] = useState('')
   const [assignState, setAssignState] = useState({})
 
-  const [newClientName, setNewClientName] = useState('')
-  const [newClientEmail, setNewClientEmail] = useState('')
-  const [savingClient, setSavingClient] = useState(false)
 
   const load = () => {
     return Promise.all([
@@ -68,25 +65,6 @@ export default function AdminClientsProfiles({ isOpsLead = false } = {}) {
       return next
     })
   }, [profiles])
-
-  const addClient = async (e) => {
-    e.preventDefault()
-    if (!newClientName.trim()) return
-    setSavingClient(true)
-    try {
-      const { data } = await api.post('/clients', {
-        name: newClientName.trim(),
-        email: newClientEmail.trim()
-      })
-      setClients(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
-      setNewClientName('')
-      setNewClientEmail('')
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to add client')
-    } finally {
-      setSavingClient(false)
-    }
-  }
 
   const createProfile = async (e) => {
     e.preventDefault()
@@ -186,55 +164,14 @@ export default function AdminClientsProfiles({ isOpsLead = false } = {}) {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>{isOpsLead ? 'Profile assignment' : 'Clients & profiles'}</h2>
+        <h2>{isOpsLead ? 'Profile assignment' : 'Profiles'}</h2>
         <p className="page-desc">
           {isOpsLead
             ? 'Unassigned profiles from all clients appear here. Assign a bidder to claim a profile for your team — it will then disappear from other Ops Leads.'
-            : 'Manage clients and investigation profiles. Profiles start unassigned; any Ops Lead can claim them by assigning a bidder.'}
+            : 'Manage investigation profiles. Profiles start unassigned; any Ops Lead can claim them by assigning a bidder. Clients are managed in the Client Management tab.'}
         </p>
       </div>
 
-      {!isOpsLead && (
-        <div className="card client-contact-card" style={{ marginBottom: '1rem' }}>
-          <div className="card-header">
-            <h3>Clients &amp; contacts</h3>
-            <span className="card-subtitle">One row per client — name and email together</span>
-          </div>
-          <form onSubmit={addClient} className="prof-inline-form prof-inline-form-2">
-            <div className="prof-create-input-wrap">
-              <label className="prof-field-label">Company / account name</label>
-              <input
-                value={newClientName}
-                onChange={e => setNewClientName(e.target.value)}
-                placeholder="e.g. Acme Corp"
-                className="prof-create-input"
-              />
-            </div>
-            <div className="prof-create-input-wrap">
-              <label className="prof-field-label">Contact email</label>
-              <input
-                value={newClientEmail}
-                onChange={e => setNewClientEmail(e.target.value)}
-                placeholder="optional"
-                className="prof-create-input"
-                type="email"
-              />
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={savingClient}>
-              {savingClient ? '…' : 'Add'}
-            </button>
-          </form>
-          {clients.length > 0 && (
-            <div className="client-im-chips">
-              {clients.map(c => (
-                <span key={c._id} className="client-chip" title={c.email || c.name}>
-                  {clientLabel(c)}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="page-header" style={{ paddingTop: 0 }}>
         <button type="button" className="btn btn-primary" onClick={() => setShowCreate(s => !s)}>

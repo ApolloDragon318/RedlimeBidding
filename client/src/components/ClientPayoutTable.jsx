@@ -1,9 +1,10 @@
 /**
  * Renders POST /salary/client-payout-table — profile-level cost rows with merged client total column.
+ * Only includes internal clients. Shows grand total and temporal summary string below the table.
  */
 export default function ClientPayoutTable({ data }) {
   if (!data?.rows?.length) {
-    return <p className="empty-state" style={{ padding: '1rem' }}>No confirmed payouts pending for this table.</p>
+    return <p className="empty-state" style={{ padding: '1rem' }}>No confirmed payouts pending for internal clients.</p>
   }
 
   const sorted = [...data.rows].sort((a, b) =>
@@ -21,6 +22,16 @@ export default function ClientPayoutTable({ data }) {
   }
 
   const summaryByClient = new Map((data.clientSummaries || []).map(s => [s.clientId, s]))
+
+  const grandTotal = (data.clientSummaries || []).reduce((sum, s) => sum + s.total, 0)
+
+  const temporalParts = [...summaryByClient.values()]
+    .sort((a, b) => a.clientName.localeCompare(b.clientName))
+    .map(s => {
+      const firstName = s.clientName.split(' ')[0]
+      return `${firstName}(${s.total.toFixed(2)})`
+    })
+  const temporalString = temporalParts.join('/')
 
   return (
     <div className="table-wrap client-payout-table-wrap">
@@ -58,8 +69,20 @@ export default function ClientPayoutTable({ data }) {
           )}
         </tbody>
       </table>
+
+      <div style={{ marginTop: '1rem', padding: '0 0.25rem' }}>
+        <p style={{ fontWeight: 600, fontSize: '0.95rem', margin: '0 0 0.35rem' }}>
+          Total: <span style={{ color: 'var(--accent)' }}>${grandTotal.toFixed(2)}</span>
+        </p>
+        {temporalString && (
+          <p className="text-muted" style={{ fontSize: '0.82rem', margin: 0, wordBreak: 'break-all' }}>
+            {temporalString}
+          </p>
+        )}
+      </div>
+
       <p className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.75rem' }}>
-        Based on confirmed reports with at least one payout still pending. Positive BM and Ops bonuses are divided evenly across their profile count. Negative bonuses are excluded from client cost.
+        Internal clients only. Positive BM and Ops bonuses are divided evenly across their profile count. Negative bonuses are excluded from client cost.
       </p>
     </div>
   )

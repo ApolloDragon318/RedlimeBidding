@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
 
 const clientSchema = new mongoose.Schema({
-  /** Company / account name — same record holds contact details. */
   name: { type: String, required: true, trim: true },
   email: { type: String, default: '', trim: true },
+  /** internal = company staff/partner, external = outside organization */
+  clientType: { type: String, enum: ['internal', 'external'], default: 'external' },
   /** Set when a user signs up as role `client` — one Client document per client user. */
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });

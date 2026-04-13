@@ -62,6 +62,16 @@ export default function AdminDashboard() {
   const [walletDeclineModal, setWalletDeclineModal] = useState(null)
   const [walletDeclineReason, setWalletDeclineReason] = useState('')
   const [walletDeclining, setWalletDeclining] = useState(false)
+  const [passwordResetRequests, setPasswordResetRequests] = useState([])
+  const [pwResetProcessing, setPwResetProcessing] = useState(null)
+
+  const [clientMgmtList, setClientMgmtList] = useState([])
+  const [clientMgmtLoading, setClientMgmtLoading] = useState(false)
+  const [clientForm, setClientForm] = useState({ firstName: '', lastName: '', email: '', password: '', clientType: 'external' })
+  const [clientSaving, setClientSaving] = useState(false)
+  const [clientEditId, setClientEditId] = useState(null)
+  const [clientEditForm, setClientEditForm] = useState({})
+  const [clientEditSaving, setClientEditSaving] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -96,6 +106,79 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === 'payouts') fetchPayoutQueue()
   }, [activeTab, fetchPayoutQueue])
+
+  const fetchClientMgmt = useCallback(async () => {
+    setClientMgmtLoading(true)
+    try {
+      const { data } = await api.get('/clients')
+      setClientMgmtList(data)
+    } catch { setClientMgmtList([]) }
+    finally { setClientMgmtLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'client-mgmt') fetchClientMgmt()
+  }, [activeTab, fetchClientMgmt])
+
+  const createClient = async (e) => {
+    e.preventDefault()
+    const { firstName, lastName, email, password, clientType } = clientForm
+    if (!firstName.trim()) return alert('First name is required')
+    if (clientType === 'external' && !lastName.trim()) return alert('Last name is required for external clients')
+    if (!email.trim()) return alert('Email is required')
+    if (!password || password.length < 6) return alert('Password must be at least 6 characters')
+    setClientSaving(true)
+    try {
+      const { data } = await api.post('/clients', { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), password, clientType })
+      setClientMgmtList(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setClientForm({ firstName: '', lastName: '', email: '', password: '', clientType: 'external' })
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to create client')
+    } finally { setClientSaving(false) }
+  }
+
+  const startEditClient = (c) => {
+    const nameParts = c.name.split(' ')
+    setClientEditId(c._id)
+    setClientEditForm({
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' ') || '',
+      email: c.email || '',
+      clientType: c.clientType || 'external'
+    })
+  }
+
+  const saveEditClient = async () => {
+    setClientEditSaving(true)
+    try {
+      const { data } = await api.patch(`/clients/${clientEditId}`, clientEditForm)
+      setClientMgmtList(prev => prev.map(c => c._id === clientEditId ? data : c))
+      setClientEditId(null)
+      setClientEditForm({})
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update client')
+    } finally { setClientEditSaving(false) }
+  }
+
+  const toggleClientType = async (c) => {
+    const newType = c.clientType === 'internal' ? 'external' : 'internal'
+    try {
+      const { data } = await api.patch(`/clients/${c._id}`, { clientType: newType })
+      setClientMgmtList(prev => prev.map(x => x._id === c._id ? data : x))
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to toggle type')
+    }
+  }
+
+  const deleteClient = async (c) => {
+    if (!confirm(`Delete client "${c.name}"? This will also delete their user account.`)) return
+    try {
+      await api.delete(`/clients/${c._id}`)
+      setClientMgmtList(prev => prev.filter(x => x._id !== c._id))
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete client')
+    }
+  }
 
   const searchWalletAddress = async () => {
     const q = walletLookupQ.trim()
@@ -148,14 +231,15 @@ export default function AdminDashboard() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [salaryRes, pendingRes, historyRes, opsRes, bmRes, biddersRes, lvlRes] = await Promise.all([
+      const [salaryRes, pendingRes, historyRes, opsRes, bmRes, biddersRes, lvlRes, pwRes] = await Promise.all([
         api.get('/salary').catch(() => ({ data: { grid: {}, roles: [], levels: [] } })),
         api.get('/users/pending').catch(() => ({ data: [] })),
         api.get('/salary/history').catch(() => ({ data: { personPayouts: [], legacyBatchPayouts: [] } })),
         api.get('/users/ops-leads').catch(() => ({ data: [] })),
         api.get('/users/bid-managers').catch(() => ({ data: [] })),
         api.get('/users/bidders').catch(() => ({ data: [] })),
-        api.get('/users/level-requests').catch(() => ({ data: [] }))
+        api.get('/users/level-requests').catch(() => ({ data: [] })),
+        api.get('/auth/password-reset-requests').catch(() => ({ data: [] }))
       ])
       setSalaryGrid(salaryRes.data?.grid || {})
       setSalaryRoles(salaryRes.data?.roles || [])
@@ -167,6 +251,7 @@ export default function AdminDashboard() {
       setBidManagersList(bmRes.data || [])
       setBiddersList(biddersRes.data || [])
       setLevelRequests(lvlRes.data || [])
+      setPasswordResetRequests(pwRes.data || [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -245,6 +330,30 @@ export default function AdminDashboard() {
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch {
       alert('Could not open profile photo')
+    }
+  }
+
+  const approvePwReset = async (id) => {
+    setPwResetProcessing(id)
+    try {
+      await api.patch(`/auth/password-reset-requests/${id}/approve`)
+      setPasswordResetRequests(prev => prev.filter(r => r._id !== id))
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to approve')
+    } finally {
+      setPwResetProcessing(null)
+    }
+  }
+
+  const dismissPwReset = async (id) => {
+    setPwResetProcessing(id)
+    try {
+      await api.patch(`/auth/password-reset-requests/${id}/dismiss`)
+      setPasswordResetRequests(prev => prev.filter(r => r._id !== id))
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to dismiss')
+    } finally {
+      setPwResetProcessing(null)
     }
   }
 
@@ -359,13 +468,18 @@ export default function AdminDashboard() {
 
       <div className="tabs">
         <button type="button" className={activeTab === 'payouts' ? 'tab active' : 'tab'} onClick={() => setActiveTab('payouts')}>Payouts</button>
-        <button type="button" className={activeTab === 'clients' ? 'tab active' : 'tab'} onClick={() => setActiveTab('clients')}>Clients &amp; profiles</button>
+        <button type="button" className={activeTab === 'client-mgmt' ? 'tab active' : 'tab'} onClick={() => setActiveTab('client-mgmt')}>Client Management</button>
+        <button type="button" className={activeTab === 'clients' ? 'tab active' : 'tab'} onClick={() => setActiveTab('clients')}>Profiles</button>
         <button type="button" className={activeTab === 'levels' ? 'tab active' : 'tab'} onClick={() => setActiveTab('levels')}>
           Level requests
           {levelRequests.length > 0 && <span className="tab-badge">{levelRequests.length}</span>}
         </button>
         <button type="button" className={activeTab === 'pending' ? 'tab active' : 'tab'} onClick={() => setActiveTab('pending')}>
           Pending Approvals {pendingUsers.length > 0 && `(${pendingUsers.length})`}
+        </button>
+        <button type="button" className={activeTab === 'pw-resets' ? 'tab active' : 'tab'} onClick={() => setActiveTab('pw-resets')}>
+          Password resets
+          {passwordResetRequests.length > 0 && <span className="tab-badge">{passwordResetRequests.length}</span>}
         </button>
         <button type="button" className={activeTab === 'assignments' ? 'tab active' : 'tab'} onClick={() => setActiveTab('assignments')}>Assignments</button>
         <button type="button" className={activeTab === 'salary' ? 'tab active' : 'tab'} onClick={() => setActiveTab('salary')}>Salary Config</button>
@@ -483,7 +597,7 @@ export default function AdminDashboard() {
                 {clientTableLoading ? 'Generating…' : 'Generate table'}
               </button>
               <span className="card-subtitle" style={{ flex: '1 1 100%' }}>
-                Per-profile costs and merged client totals for pending payouts.
+                Internal clients only — per-profile costs and merged client totals for pending payouts.
               </span>
             </div>
             {clientPayoutData && <ClientPayoutTable data={clientPayoutData} />}
@@ -491,7 +605,235 @@ export default function AdminDashboard() {
         </>
       )}
 
+      {/* ── Client Management ── */}
+      {activeTab === 'client-mgmt' && (
+        <>
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div className="card-header">
+              <h3>Create client</h3>
+              <span className="card-subtitle">Create a client account with sign-in credentials. Toggle between Internal and External type.</span>
+            </div>
+            <form onSubmit={createClient} className="prof-inline-form" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="prof-create-input-wrap">
+                <label className="prof-field-label">Type</label>
+                <select
+                  value={clientForm.clientType}
+                  onChange={e => setClientForm(f => ({ ...f, clientType: e.target.value }))}
+                  className="prof-create-input"
+                >
+                  <option value="external">External</option>
+                  <option value="internal">Internal</option>
+                </select>
+              </div>
+              <div className="prof-create-input-wrap">
+                <label className="prof-field-label">First name *</label>
+                <input
+                  value={clientForm.firstName}
+                  onChange={e => setClientForm(f => ({ ...f, firstName: e.target.value }))}
+                  placeholder="First name"
+                  className="prof-create-input"
+                  required
+                />
+              </div>
+              <div className="prof-create-input-wrap">
+                <label className="prof-field-label">Last name {clientForm.clientType === 'external' ? '*' : ''}</label>
+                <input
+                  value={clientForm.lastName}
+                  onChange={e => setClientForm(f => ({ ...f, lastName: e.target.value }))}
+                  placeholder="Last name"
+                  className="prof-create-input"
+                  required={clientForm.clientType === 'external'}
+                />
+              </div>
+              <div className="prof-create-input-wrap">
+                <label className="prof-field-label">Email *</label>
+                <input
+                  value={clientForm.email}
+                  onChange={e => setClientForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="client@example.com"
+                  className="prof-create-input"
+                  type="email"
+                  required
+                />
+              </div>
+              <div className="prof-create-input-wrap">
+                <label className="prof-field-label">Password *</label>
+                <input
+                  value={clientForm.password}
+                  onChange={e => setClientForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="Min 6 characters"
+                  className="prof-create-input"
+                  type="text"
+                  minLength={6}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={clientSaving} style={{ alignSelf: 'flex-end' }}>
+                {clientSaving ? '...' : 'Add client'}
+              </button>
+            </form>
+          </div>
+
+          {clientMgmtLoading ? (
+            <div className="page-loading"><div className="spinner" /></div>
+          ) : clientMgmtList.length === 0 ? (
+            <div className="card">
+              <div className="empty-state-box">
+                <span className="empty-state-icon">👥</span>
+                <p>No clients yet</p>
+              </div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-header">
+                <h3>All clients ({clientMgmtList.length})</h3>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Type</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clientMgmtList.map(c => (
+                      <tr key={c._id}>
+                        {clientEditId === c._id ? (
+                          <>
+                            <td>
+                              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                <input
+                                  value={clientEditForm.firstName}
+                                  onChange={e => setClientEditForm(f => ({ ...f, firstName: e.target.value }))}
+                                  placeholder="First name"
+                                  className="inline-edit-input"
+                                  style={{ width: '45%' }}
+                                />
+                                <input
+                                  value={clientEditForm.lastName}
+                                  onChange={e => setClientEditForm(f => ({ ...f, lastName: e.target.value }))}
+                                  placeholder="Last name"
+                                  className="inline-edit-input"
+                                  style={{ width: '45%' }}
+                                />
+                              </div>
+                            </td>
+                            <td>
+                              <input
+                                value={clientEditForm.email}
+                                onChange={e => setClientEditForm(f => ({ ...f, email: e.target.value }))}
+                                placeholder="Email"
+                                className="inline-edit-input"
+                                type="email"
+                              />
+                            </td>
+                            <td>
+                              <select
+                                value={clientEditForm.clientType}
+                                onChange={e => setClientEditForm(f => ({ ...f, clientType: e.target.value }))}
+                                className="inline-edit-input"
+                              >
+                                <option value="external">External</option>
+                                <option value="internal">Internal</option>
+                              </select>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                <button type="button" className="btn btn-primary btn-sm" onClick={saveEditClient} disabled={clientEditSaving}>
+                                  {clientEditSaving ? '...' : 'Save'}
+                                </button>
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setClientEditId(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td>{c.name}</td>
+                            <td>{c.email || '—'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className={`badge badge-toggle ${c.clientType === 'internal' ? 'badge-info' : 'badge-default'}`}
+                                onClick={() => toggleClientType(c)}
+                                title="Click to toggle"
+                              >
+                                {c.clientType === 'internal' ? 'Internal' : 'External'}
+                              </button>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEditClient(c)}>Edit</button>
+                                <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => deleteClient(c)}>Delete</button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {activeTab === 'clients' && <AdminClientsProfiles />}
+
+      {/* ── Password reset requests ── */}
+      {activeTab === 'pw-resets' && (
+        <>
+          {passwordResetRequests.length === 0 ? (
+            <div className="card">
+              <div className="empty-state-box">
+                <span className="empty-state-icon">🔑</span>
+                <p>No pending password reset requests</p>
+                <span className="text-muted">Users can request a reset from the sign-in page. Approving sets their password to <strong>12345678</strong>.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-header">
+                <h3>Password reset requests</h3>
+                <span className="card-subtitle">Approving resets the user&apos;s password to <strong>12345678</strong>. They can then sign in and change it.</span>
+              </div>
+              <div className="payout-requests-list">
+                {passwordResetRequests.map(r => (
+                  <div key={r._id} className="payout-request-card">
+                    <div className="payout-request-item">
+                      <strong>{r.userId?.name || 'User'}</strong>
+                      <span className="badge badge-role">{String(r.userId?.role || '').replace(/_/g, ' ')}</span>
+                      <span className="text-muted">{r.userId?.email}</span>
+                      <span className="text-muted" style={{ fontSize: '0.8rem' }}>{new Date(r.createdAt).toLocaleString()}</span>
+                      <div className="payout-request-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={pwResetProcessing === r._id}
+                          onClick={() => approvePwReset(r._id)}
+                        >
+                          {pwResetProcessing === r._id ? '…' : 'Approve reset'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm btn-danger"
+                          disabled={pwResetProcessing === r._id}
+                          onClick={() => dismissPwReset(r._id)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* ── Level Requests ── */}
       {activeTab === 'levels' && (

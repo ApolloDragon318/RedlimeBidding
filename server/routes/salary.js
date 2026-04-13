@@ -471,8 +471,14 @@ router.post('/client-payout-table', authenticate, requireRole('admin', 'financia
 
     const rows = await buildPayoutRowsFromPendingReports(pendingReports, rateMap, adminBonuses);
 
+    const Client = (await import('../models/Client.js')).default;
+    const allClients = await Client.find({}).lean();
+    const clientTypeMap = new Map(allClients.map(c => [String(c._id), c.clientType || 'external']));
+
+    const internalRows = rows.filter(r => clientTypeMap.get(r.clientId) === 'internal');
+
     const summaryMap = new Map();
-    for (const row of rows) {
+    for (const row of internalRows) {
       const key = row.clientId;
       if (!summaryMap.has(key)) {
         summaryMap.set(key, { clientId: row.clientId, clientName: row.clientName, total: 0 });
@@ -484,7 +490,7 @@ router.post('/client-payout-table', authenticate, requireRole('admin', 'financia
     }
 
     res.json({
-      rows,
+      rows: internalRows,
       clientSummaries: [...summaryMap.values()],
       taxRate: TAX_RATE
     });

@@ -14,6 +14,7 @@ import {
 } from '../middleware/uploadOnboarding.js';
 import WalletChangeRequest from '../models/WalletChangeRequest.js';
 import Client from '../models/Client.js';
+import PasswordResetRequest from '../models/PasswordResetRequest.js';
 
 const router = express.Router();
 const uploadsRootResolved = path.resolve(UPLOADS_ROOT);
@@ -375,6 +376,74 @@ router.post('/login', async (req, res) => {
       token,
       user: userResponse(user)
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Public: request a password reset (admin must approve). */
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email?.trim()) return res.status(400).json({ error: 'Email is required' });
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    if (!user) {
+      return res.json({ success: true, message: 'If an account with that email exists, a reset request has been submitted.' });
+    }
+    const existing = await PasswordResetRequest.findOne({ userId: user._id, status: 'pending' });
+    if (existing) {
+      return res.json({ success: true, message: 'A reset request is already pending. Please wait for an administrator to approve it.' });
+    }
+    await PasswordResetRequest.create({ userId: user._id });
+    res.json({ success: true, message: 'Password reset request submitted. An administrator will approve it shortly. After approval, sign in with the default password: 12345678' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin: list pending password reset requests. */
+router.get('/password-reset-requests', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const list = await PasswordResetRequest.find({ status: 'pending' })
+      .populate('userId', 'name email role')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin: approve a password reset → set password to 12345678. */
+router.patch('/password-reset-requests/:id/approve', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const pr = await PasswordResetRequest.findById(req.params.id);
+    if (!pr || pr.status !== 'pending') return res.status(404).json({ error: 'Request not found or already handled' });
+    const user = await User.findById(pr.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.password = '12345678';
+    await user.save();
+    pr.status = 'approved';
+    pr.approvedAt = new Date();
+    pr.approvedBy = req.user._id;
+    await pr.save();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Admin: dismiss (deny) a password reset request. */
+router.patch('/password-reset-requests/:id/dismiss', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const pr = await PasswordResetRequest.findById(req.params.id);
+    if (!pr || pr.status !== 'pending') return res.status(404).json({ error: 'Request not found or already handled' });
+    pr.status = 'dismissed';
+    await pr.save();
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
