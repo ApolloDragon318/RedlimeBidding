@@ -227,6 +227,9 @@ async function buildPayoutRowsFromPendingReports(pendingReports, rateMap, adminB
     const profileDoc = await getProfile(r.profileId);
     const clientName = profileDoc?.clientId?.name || 'Unknown';
     const clientIdStr = profileDoc?.clientId?._id ? String(profileDoc.clientId._id) : 'unknown';
+    const bidCountN = Number(r.bidCount) || 0;
+    const bidderPayFromBids = bidCountN * bidderRate;
+    const bmBonusToBidder = Math.max(0, bmToBidderBonus);
     rows.push({
       reportId: r._id,
       profileId: r.profileId,
@@ -239,7 +242,24 @@ async function buildPayoutRowsFromPendingReports(pendingReports, rateMap, adminB
       bmShare: Number(bmShare.toFixed(2)),
       opsShare: Number(opsShare.toFixed(2)),
       profilePay: Number(profilePay.toFixed(2)),
-      total: Number(total.toFixed(2))
+      total: Number(total.toFixed(2)),
+      clientBreakdown: {
+        bidCount: bidCountN,
+        bidderRatePerBid: Number(bidderRate.toFixed(4)),
+        bidderLevel: bidder?.level || null,
+        bidderPayFromBids: Number(bidderPayFromBids.toFixed(2)),
+        bidManagerBonusToBidder: Number(bmBonusToBidder.toFixed(2)),
+        bmRatePerProfile: Number(profileRate.toFixed(4)),
+        bmLevel: bm.level || null,
+        opsTeamBonusShare: Number(opsTeamBonusPerProfile.toFixed(2)),
+        adminBmBonusShare: Number(adminBmBonusPerProfile.toFixed(2)),
+        bmLayerSubtotal: Number(bmShare.toFixed(2)),
+        opsBaseShare: Number(opsBasePR.toFixed(2)),
+        adminOpsBonusShare: Number(adminOpsBonusPerProfile.toFixed(2)),
+        opsLayerSubtotal: Number(opsShare.toFixed(2)),
+        profilePay: Number(profilePay.toFixed(2)),
+        total: Number(total.toFixed(2))
+      }
     });
   }
   return rows;
@@ -852,17 +872,48 @@ router.get('/profile-payout-approvals/me', authenticate, requireRole('client'), 
       .populate('opsLeadId', 'name')
       .sort({ updatedAt: -1 })
       .lean();
-    const approvals = list.map(a => ({
-      _id: a._id,
-      profileId: a.profileId,
-      profileName: a.profileId?.name,
-      opsLeadName: a.opsLeadId?.name,
-      totalAmount: a.clientVisibleTotal,
-      reportCount: (a.reportIds || []).length,
-      clientApprovedAt: a.clientApprovedAt,
-      adminApprovedAt: a.adminApprovedAt,
-      canApprove: !(a.clientApprovedAt || a.adminApprovedAt)
-    }));
+
+    const rateMap = await loadRateMap();
+    const pendingReports = await Report.find({
+      workflowStatus: WORKFLOW.CONFIRMED,
+      $or: PENDING_ANY_ROLE_UNPAID
+    }).lean();
+    const payoutRows = await buildPayoutRowsFromPendingReports(pendingReports, rateMap, {});
+    const rowsByProfile = new Map();
+    for (const row of payoutRows) {
+      const pid = String(row.profileId);
+      if (!rowsByProfile.has(pid)) rowsByProfile.set(pid, []);
+      rowsByProfile.get(pid).push(row);
+    }
+
+    const approvals = list.map(a => {
+      const pid = String(a.profileId?._id || a.profileId);
+      const lines = rowsByProfile.get(pid) || [];
+      const reportBreakdown = lines.map(row => ({
+        reportId: row.reportId,
+        reportTitle: row.profileName,
+        bidderName: row.bidderName,
+        bidManagerName: row.bidManagerName,
+        bidderPay: row.bidderPay,
+        profilePay: row.profilePay,
+        total: row.total,
+        breakdown: row.clientBreakdown
+      }));
+      const sumFromLines = reportBreakdown.reduce((s, x) => s + x.total, 0);
+      return {
+        _id: a._id,
+        profileId: a.profileId,
+        profileName: a.profileId?.name,
+        opsLeadName: a.opsLeadId?.name,
+        totalAmount: a.clientVisibleTotal,
+        reportCount: (a.reportIds || []).length,
+        clientApprovedAt: a.clientApprovedAt,
+        adminApprovedAt: a.adminApprovedAt,
+        canApprove: !(a.clientApprovedAt || a.adminApprovedAt),
+        reportBreakdown,
+        breakdownTotalCheck: Number(sumFromLines.toFixed(2))
+      };
+    });
     res.json({ approvals });
   } catch (e) {
     res.status(500).json({ error: e.message });

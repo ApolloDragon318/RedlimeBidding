@@ -1,6 +1,71 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api'
 
+function fmtMoney(n) {
+  const x = Number(n)
+  return Number.isFinite(x) ? x.toFixed(2) : '0.00'
+}
+
+function ReportBreakdownLines({ line }) {
+  const b = line.breakdown
+  if (!b) return null
+  const rateBid = Number(b.bidderRatePerBid || 0).toFixed(4)
+  const rateBm = Number(b.bmRatePerProfile || 0).toFixed(4)
+  const parts = []
+  parts.push(
+    `${b.bidCount} bid${b.bidCount === 1 ? '' : 's'} × $${rateBid}/bid = $${fmtMoney(b.bidderPayFromBids)}`
+  )
+  if (b.bidManagerBonusToBidder > 0) {
+    parts.push(`+ BM→bidder bonus $${fmtMoney(b.bidManagerBonusToBidder)}`)
+  }
+  const bidderExpr = parts.join(' ')
+  return (
+    <div className="client-payout-breakdown-report">
+      <div className="client-payout-breakdown-report-title">
+        Report: <strong>{line.reportTitle || 'Work'}</strong>
+        <span className="text-muted"> · Bidder: {line.bidderName || '—'} · BM: {line.bidManagerName || '—'}</span>
+      </div>
+      <ol className="client-payout-breakdown-steps">
+        <li>
+          <span className="client-payout-breakdown-label">Bidder pay</span>
+          <code className="client-payout-breakdown-math">
+            {bidderExpr} = <strong>${fmtMoney(line.bidderPay)}</strong>
+          </code>
+        </li>
+        <li>
+          <span className="client-payout-breakdown-label">BM layer (per profile)</span>
+          <code className="client-payout-breakdown-math">
+            BM rate ${rateBm}/profile
+            {b.opsTeamBonusShare > 0 ? ` + team bonus share $${fmtMoney(b.opsTeamBonusShare)}` : ''}
+            {b.adminBmBonusShare > 0 ? ` + admin BM bonus share $${fmtMoney(b.adminBmBonusShare)}` : ''}
+            {' '}= <strong>${fmtMoney(b.bmLayerSubtotal)}</strong>
+          </code>
+        </li>
+        <li>
+          <span className="client-payout-breakdown-label">Ops layer (per report)</span>
+          <code className="client-payout-breakdown-math">
+            Ops base share ${fmtMoney(b.opsBaseShare)}
+            {b.adminOpsBonusShare > 0 ? ` + admin Ops bonus share $${fmtMoney(b.adminOpsBonusShare)}` : ''}
+            {' '}= <strong>${fmtMoney(b.opsLayerSubtotal)}</strong>
+          </code>
+        </li>
+        <li>
+          <span className="client-payout-breakdown-label">Profile pay</span>
+          <code className="client-payout-breakdown-math">
+            BM layer + Ops layer = <strong>${fmtMoney(b.profilePay)}</strong>
+          </code>
+        </li>
+        <li className="client-payout-breakdown-total">
+          <span className="client-payout-breakdown-label">This report</span>
+          <code className="client-payout-breakdown-math">
+            Bidder pay + Profile pay = <strong>${fmtMoney(line.total)}</strong>
+          </code>
+        </li>
+      </ol>
+    </div>
+  )
+}
+
 export default function ClientPayoutApprovals() {
   const [approvals, setApprovals] = useState([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +111,7 @@ export default function ClientPayoutApprovals() {
       <div className="page-header">
         <h2>Profile payout approvals</h2>
         <p className="page-desc">
-          Approve pending work for your profiles by total amount. Tax and net pay are handled by our team — you only confirm the total for your organization.
+          Each card shows how the total is built (bids × rate, bonuses, BM and Ops shares) before you approve. Tax and net pay are handled by our team — you confirm the client cost total for your organization.
         </p>
       </div>
 
@@ -75,6 +140,26 @@ export default function ClientPayoutApprovals() {
                         <span className="text-muted" style={{ marginLeft: '0.5rem' }}>({a.reportCount} report(s))</span>
                       ) : null}
                     </p>
+
+                    {a.reportBreakdown?.length > 0 && (
+                      <div className="client-payout-breakdown">
+                        <p className="client-payout-breakdown-intro">How we reach this total (same math as payouts):</p>
+                        {a.reportBreakdown.map(row => (
+                          <ReportBreakdownLines key={String(row.reportId)} line={row} />
+                        ))}
+                        {typeof a.breakdownTotalCheck === 'number' && (
+                          <p className="client-payout-breakdown-sum text-muted">
+                            Sum of report lines: <strong>${fmtMoney(a.breakdownTotalCheck)}</strong>
+                            {Math.abs(a.breakdownTotalCheck - Number(a.totalAmount || 0)) < 0.02
+                              ? ' — matches profile total above'
+                              : (
+                                <span> · Profile total stored: <strong>${fmtMoney(a.totalAmount)}</strong></span>
+                              )}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     <div className="profile-approval-badges">
                       <span className={`badge ${profileReady ? 'badge-approved' : 'badge-pending'}`}>
                         {profileReady

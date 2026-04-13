@@ -3675,3 +3675,66 @@
   background: var(--bg);
   color: var(--fg);
 }
+
+/* Client-facing payout breakdown (profile approval) */
+.client-payout-breakdown {
+  margin: 0.75rem 0 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+.client-payout-breakdown-intro {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.client-payout-breakdown-report {
+  margin-bottom: 1rem;
+}
+.client-payout-breakdown-report:last-of-type {
+  margin-bottom: 0.35rem;
+}
+.client-payout-breakdown-report-title {
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.35;
+}
+.client-payout-breakdown-steps {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.client-payout-breakdown-steps li {
+  margin-bottom: 0.35rem;
+}
+.client-payout-breakdown-label {
+  display: block;
+  color: var(--muted-fg, #94a3b8);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.12rem;
+}
+.client-payout-breakdown-math {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  color: var(--fg);
+  background: transparent;
+  padding: 0;
+}
+.client-payout-breakdown-total {
+  list-style-type: none;
+  margin-left: -1.1rem;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.35);
+}
+.client-payout-breakdown-sum {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+}
