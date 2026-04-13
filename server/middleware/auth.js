@@ -21,3 +21,11 @@ export const requireRole = (...roles) => (req, res, next) => {
   }
   next();
 };
+
+/** Block client users until an admin has approved their account (no effect on other roles). */
+export const requireApprovedIfClient = (req, res, next) => {
+  if (req.user.role === 'client' && req.user.status !== 'approved') {
+    return res.status(403).json({ error: 'Your client account is pending administrator approval.' });
+  }
+  next();
+};

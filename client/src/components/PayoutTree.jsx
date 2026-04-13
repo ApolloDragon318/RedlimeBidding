@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function PayRow({ user, bonusByUser, setBonusByUser, onPay, payoutRequests = [], taxRate = 0.10, indent = 0 }) {
+function PayRow({ user, bonusByUser, setBonusByUser, onPay, taxRate = 0.10, indent = 0 }) {
   const key = String(user.userId)
   const raw = bonusByUser[key]
   const bonus = raw === undefined || raw === '' ? 0 : Number(raw)
@@ -83,8 +83,7 @@ export default function PayoutTree({
   setBonusByUser,
   onPay,
   onRefresh,
-  taxRate = 0.10,
-  payoutRequests = []
+  taxRate = 0.10
 }) {
   const [collapsed, setCollapsed] = useState({})
   const toggle = key => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
@@ -94,7 +93,7 @@ export default function PayoutTree({
       <div className="payout-empty">
         <div className="payout-empty-icon">$</div>
         <p>No payouts ready</p>
-        <span>An Ops Lead must submit a payment request and it must be confirmed above before the team appears here for payment.</span>
+        <span>Teams appear when there is confirmed, unpaid work. When a profile has a client, either the client or admin/financial can approve it; otherwise admin/FM approval is required.</span>
       </div>
     )
   }
@@ -115,7 +114,6 @@ export default function PayoutTree({
                 bonusByUser={bonusByUser}
                 setBonusByUser={setBonusByUser}
                 onPay={onPay}
-                payoutRequests={payoutRequests}
                 taxRate={taxRate}
                 indent={0}
               />
@@ -133,7 +131,6 @@ export default function PayoutTree({
                         bonusByUser={bonusByUser}
                         setBonusByUser={setBonusByUser}
                         onPay={onPay}
-                        payoutRequests={payoutRequests}
                         taxRate={taxRate}
                         indent={1}
                       />
@@ -144,7 +141,6 @@ export default function PayoutTree({
                             bonusByUser={bonusByUser}
                             setBonusByUser={setBonusByUser}
                             onPay={onPay}
-                            payoutRequests={payoutRequests}
                             taxRate={taxRate}
                             indent={2}
                           />

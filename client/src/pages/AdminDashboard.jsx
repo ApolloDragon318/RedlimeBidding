@@ -4,6 +4,7 @@ import PayoutTree from '../components/PayoutTree'
 import PayConfirmModal from '../components/PayConfirmModal'
 import SalaryRateGrid from '../components/SalaryRateGrid'
 import ClientPayoutTable from '../components/ClientPayoutTable'
+import ProfilePayoutApprovalsCard from '../components/ProfilePayoutApprovalsCard'
 import AdminClientsProfiles from './AdminClientsProfiles'
 
 const ADMIN_DIRECT_ROLES = [
@@ -33,7 +34,6 @@ export default function AdminDashboard() {
   const [legacyBatchPayouts, setLegacyBatchPayouts] = useState([])
   const [payoutTree, setPayoutTree] = useState([])
   const [payoutTaxRate, setPayoutTaxRate] = useState(0.10)
-  const [payoutRequests, setPayoutRequests] = useState([])
   const [adminBonusByUser, setAdminBonusByUser] = useState({})
   const [payConfirm, setPayConfirm] = useState(null)
   const [payTxId, setPayTxId] = useState('')
@@ -54,11 +54,6 @@ export default function AdminDashboard() {
   const [lvlProcessing, setLvlProcessing] = useState(null)
   const [clientPayoutData, setClientPayoutData] = useState(null)
   const [clientTableLoading, setClientTableLoading] = useState(false)
-  const [payoutDeclineModal, setPayoutDeclineModal] = useState(null)
-  const [payoutDeclineReason, setPayoutDeclineReason] = useState('')
-  const [payoutDeclining, setPayoutDeclining] = useState(false)
-  const [payoutConfirmingId, setPayoutConfirmingId] = useState(null)
-  const [expandedPayoutReq, setExpandedPayoutReq] = useState(null)
   const [walletChangeRequests, setWalletChangeRequests] = useState([])
   const [walletLookupQ, setWalletLookupQ] = useState('')
   const [walletLookupResults, setWalletLookupResults] = useState(null)
@@ -84,19 +79,16 @@ export default function AdminDashboard() {
 
   const fetchPayoutQueue = useCallback(async () => {
     try {
-      const [qRes, prRes, wrRes] = await Promise.all([
+      const [qRes, wrRes] = await Promise.all([
         api.get('/salary/payout-queue'),
-        api.get('/salary/payout-requests').catch(() => ({ data: { requests: [] } })),
         api.get('/users/wallet-change-requests').catch(() => ({ data: { requests: [] } }))
       ])
       setPayoutTree(qRes.data.tree || [])
       setPayoutTaxRate(qRes.data.taxRate ?? 0.10)
-      setPayoutRequests(prRes.data?.requests || [])
       setWalletChangeRequests(wrRes.data?.requests || [])
     } catch (e) {
       console.error(e)
       setPayoutTree([])
-      setPayoutRequests([])
       setWalletChangeRequests([])
     }
   }, [])
@@ -104,24 +96,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === 'payouts') fetchPayoutQueue()
   }, [activeTab, fetchPayoutQueue])
-
-  const openPayoutDecline = req => {
-    setPayoutDeclineModal(req)
-    setPayoutDeclineReason('')
-  }
-
-  const confirmPayoutRequest = async req => {
-    if (!req?._id) return
-    setPayoutConfirmingId(req._id)
-    try {
-      await api.post(`/salary/payout-requests/${req._id}/confirm`)
-      await fetchPayoutQueue()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to confirm')
-    } finally {
-      setPayoutConfirmingId(null)
-    }
-  }
 
   const searchWalletAddress = async () => {
     const q = walletLookupQ.trim()
@@ -168,25 +142,6 @@ export default function AdminDashboard() {
       alert(err.response?.data?.error || 'Failed to decline')
     } finally {
       setWalletDeclining(false)
-    }
-  }
-
-  const confirmPayoutDecline = async () => {
-    if (!payoutDeclineModal?._id) return
-    const r = payoutDeclineReason.trim()
-    if (!r) {
-      alert('Please enter a reason for declining this request.')
-      return
-    }
-    setPayoutDeclining(true)
-    try {
-      await api.post(`/salary/payout-requests/${payoutDeclineModal._id}/decline`, { reason: r })
-      setPayoutDeclineModal(null)
-      await fetchPayoutQueue()
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to decline')
-    } finally {
-      setPayoutDeclining(false)
     }
   }
 
@@ -398,7 +353,7 @@ export default function AdminDashboard() {
       <div className="page-header">
         <h2>Admin Dashboard</h2>
         <p className="page-desc">
-          Bidder pay = bids &times; rate + BM bonus. BM pay = profiles &times; rate + <strong>one</strong> Ops bonus total per BM. Ops pay = profiles &times; rate.
+          Bidder pay = bids &times; rate + BM bonus. BM pay = profiles &times; rate + <strong>one</strong> Ops bonus total per BM. Ops pay = profiles &times; rate. When a client owns a profile, either the client or admin/FM must approve it before payout.
         </p>
       </div>
 
@@ -493,87 +448,18 @@ export default function AdminDashboard() {
           </div>
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="card-header">
-              <h3>Payout requests</h3>
+              <h3>Profile payout approvals</h3>
               <span className="card-subtitle">
-                <strong>Confirm</strong> after review — only then can they be paid in the tree below. <strong>Decline</strong> sends feedback so they can request again.
+                When a profile belongs to a client, either the client or admin/financial can approve it; internal profiles need admin/FM only. Tax estimates are for internal use only.
               </span>
             </div>
-            {payoutRequests.length === 0 ? (
-              <p className="payout-requests-empty">No open payout requests right now.</p>
-            ) : (
-              <div className="payout-requests-list">
-                {payoutRequests.map(req => {
-                  const isOpen = expandedPayoutReq === req._id
-                  return (
-                    <div key={req._id} className="payout-request-card">
-                      <div className="payout-request-item">
-                        <strong>{req.userId?.name || 'User'}</strong>
-                        <span className="badge badge-role">{String(req.role || '').replace(/_/g, ' ')}</span>
-                        <span className={`badge ${req.status === 'confirmed' ? 'badge-approved' : 'badge-pending'}`}>
-                          {req.status === 'confirmed' ? 'Approved — ready to pay' : 'Awaiting confirmation'}
-                        </span>
-                        <span className="text-muted">{req.userId?.email}</span>
-                        {req.teamBreakdown?.length > 0 && (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExpandedPayoutReq(isOpen ? null : req._id)}>
-                            {isOpen ? 'Hide team' : 'Show team'}
-                          </button>
-                        )}
-                        <div className="payout-request-actions">
-                          {req.status === 'pending' && (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => confirmPayoutRequest(req)}
-                                disabled={payoutConfirmingId === req._id}
-                              >
-                                {payoutConfirmingId === req._id ? '…' : 'Confirm'}
-                              </button>
-                              <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => openPayoutDecline(req)}>
-                                Decline
-                              </button>
-                            </>
-                          )}
-                          <span className="payout-request-time">{new Date(req.createdAt).toLocaleString()}</span>
-                        </div>
-                      </div>
-                      {isOpen && req.teamBreakdown && (
-                        <div className="pr-team-breakdown">
-                          {req.teamBreakdown.map((bm, i) => (
-                            <div key={i} className="pr-team-bm">
-                              <div className="pr-team-bm-header">
-                                <strong>{bm.bmName}</strong>
-                                <span className="badge badge-role badge-bid_manager">bid manager</span>
-                                <span className="text-muted">{bm.profileCount} profile(s) × ${bm.profileRate} + ${bm.opsBonusTotal} Ops bonus</span>
-                              </div>
-                              {bm.bidders.length > 0 && (
-                                <div className="pr-team-bidders">
-                                  {bm.bidders.map((b, j) => (
-                                    <div key={j} className="pr-team-bidder-row">
-                                      <span className="pr-team-bidder-name">{b.name}</span>
-                                      <span className="pr-team-chip">{b.totalBidCount} bids</span>
-                                      <span className="pr-team-chip">× ${b.bidderRate}/bid</span>
-                                      <span className="pr-team-chip">BM bonus ${b.bmBonusTotal.toFixed(2)}</span>
-                                      <span className="text-muted">{b.reportCount} report(s)</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            <ProfilePayoutApprovalsCard onUpdated={fetchPayoutQueue} />
           </div>
           <div className="card">
             <div className="card-header">
               <h3>Payouts</h3>
               <button type="button" className="btn btn-ghost btn-sm" onClick={fetchPayoutQueue}>Refresh</button>
-              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Confirmed payout requests appear here. Ops Lead must request → you confirm → then pay.</span>
+              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Pay team members once per-profile approval is in place. Amounts only include approved profiles.</span>
             </div>
             <PayoutTree
               tree={payoutTree}
@@ -582,7 +468,6 @@ export default function AdminDashboard() {
               onPay={user => setPayConfirm(user)}
               onRefresh={fetchPayoutQueue}
               taxRate={payoutTaxRate}
-              payoutRequests={payoutRequests}
             />
           </div>
 
@@ -815,7 +700,8 @@ export default function AdminDashboard() {
             </div>
             <p className="card-subtitle" style={{ marginBottom: '0.75rem' }}>
               <strong>Bidder / Bid manager:</strong> Ops Lead already assigned role &amp; level.{' '}
-              <strong>Direct applicant:</strong> choose role &amp; level below.
+              <strong>Direct applicant:</strong> choose role &amp; level below.{' '}
+              <strong>Client org:</strong> simple signup — approve to grant access (no ID/photo required).
             </p>
 
             {pendingUsers.length === 0 ? (
@@ -845,10 +731,12 @@ export default function AdminDashboard() {
                             <span className="pending-wallet-dup-badge" title="ERC-20 wallet matches another account">Duplicate wallet</span>
                           )}
                         </div>
-                        <div className="pending-item-docs">
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openPhoto(u._id) }}>Photo</button>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openNationalId(u._id) }}>ID</button>
-                        </div>
+                        {u.role !== 'client' && (
+                          <div className="pending-item-docs">
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openPhoto(u._id) }}>Photo</button>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openNationalId(u._id) }}>ID</button>
+                          </div>
+                        )}
                         <span className={`pending-item-chevron${isExpanded ? ' open' : ''}`}>▾</span>
                       </div>
 
@@ -946,9 +834,17 @@ export default function AdminDashboard() {
           {rejectModal && (
             <div className="modal-backdrop" onClick={() => !rejecting && setRejectModal(null)}>
               <div className="modal-pay" onClick={e => e.stopPropagation()}>
-                <h3>Reject applicant</h3>
+                <h3>{rejectModal.role === 'client' ? 'Reject client account' : 'Reject applicant'}</h3>
                 <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
-                  <strong>{rejectModal.name}</strong> ({rejectModal.email}) will be sent back to onboarding and can resubmit after reviewing your feedback.
+                  {rejectModal.role === 'client' ? (
+                    <>
+                      <strong>{rejectModal.name}</strong> ({rejectModal.email}) will not be able to use the platform. You can explain why below.
+                    </>
+                  ) : (
+                    <>
+                      <strong>{rejectModal.name}</strong> ({rejectModal.email}) will be sent back to onboarding and can resubmit after reviewing your feedback.
+                    </>
+                  )}
                 </p>
                 <label className="pending-reject-label">Reason for rejection *</label>
                 <textarea
@@ -1160,45 +1056,6 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {payoutDeclineModal && (
-        <div className="modal-overlay" onClick={() => !payoutDeclining && setPayoutDeclineModal(null)}>
-          <div className="modal modal-pay" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Decline payout request</h3>
-              <button type="button" className="modal-close" onClick={() => setPayoutDeclineModal(null)} disabled={payoutDeclining}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
-                Declining <strong>{payoutDeclineModal.userId?.name || 'User'}</strong>&apos;s payment request. They will see your reason and can submit a new request after fixing the issue.
-              </p>
-              <div className="form-row">
-                <label>Reason (required)</label>
-                <textarea
-                  rows={4}
-                  placeholder="Explain what needs to be corrected…"
-                  value={payoutDeclineReason}
-                  onChange={e => setPayoutDeclineReason(e.target.value)}
-                  disabled={payoutDeclining}
-                  className="lvl-modal-textarea"
-                />
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={payoutDeclining}
-                  onClick={confirmPayoutDecline}
-                >
-                  {payoutDeclining ? 'Declining…' : 'Decline request'}
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setPayoutDeclineModal(null)} disabled={payoutDeclining}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

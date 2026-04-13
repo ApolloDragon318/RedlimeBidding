@@ -25,6 +25,10 @@ export default function OpsLeadAssignments() {
   const [lvlReason, setLvlReason] = useState('')
   const [lvlSubmitting, setLvlSubmitting] = useState(false)
 
+  const [rejectModal, setRejectModal] = useState(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+
   const [tab, setTab] = useState('team')
 
   useEffect(() => {
@@ -118,13 +122,34 @@ export default function OpsLeadAssignments() {
     }
   }
 
+  const confirmRejectBidder = async () => {
+    if (!rejectModal?._id) return
+    if (!rejectReason.trim()) {
+      alert('Please provide a reason.')
+      return
+    }
+    setRejecting(true)
+    try {
+      await api.patch(`/users/${rejectModal._id}/reject`, { reason: rejectReason.trim() })
+      setBidders(prev => prev.filter(b => b._id !== rejectModal._id))
+      setRejectModal(null)
+      setRejectReason('')
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reject')
+    } finally {
+      setRejecting(false)
+    }
+  }
+
   if (loading) return <div className="page-loading"><div className="spinner" /></div>
 
   return (
     <div className="page">
       <div className="page-header">
         <h2>Team management</h2>
-        <p className="page-desc">Assignments and level promotions for your team.</p>
+        <p className="page-desc">
+          Assignments and level promotions for your team. You can reject a bidder with a reason (only from this list — there is no global user search).
+        </p>
       </div>
 
       <div className="tabs" style={{ marginBottom: '1rem' }}>
@@ -216,6 +241,15 @@ export default function OpsLeadAssignments() {
                       {pendingRequestUserIds.has(b._id) && (
                         <span className="badge badge-pending">Pending</span>
                       )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-danger"
+                        disabled={assigning}
+                        onClick={() => { setRejectModal(b); setRejectReason('') }}
+                        title="Reject bidder from the platform"
+                      >
+                        Reject
+                      </button>
                       <select
                         value={bm._id}
                         onChange={e => reassign(b._id, e.target.value)}
@@ -248,6 +282,15 @@ export default function OpsLeadAssignments() {
                       <span className="assignment-email">{b.email}</span>
                     </div>
                     <span className="badge badge-level">{levelLabel(b.level)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-danger"
+                      disabled={assigning}
+                      onClick={() => { setRejectModal(b); setRejectReason('') }}
+                      title="Reject bidder from the platform"
+                    >
+                      Reject
+                    </button>
                     <select
                       defaultValue=""
                       onChange={e => reassign(b._id, e.target.value)}
@@ -399,6 +442,46 @@ export default function OpsLeadAssignments() {
                   {lvlSubmitting ? 'Submitting...' : 'Submit request'}
                 </button>
                 <button type="button" className="btn btn-ghost" onClick={() => setLvlModal(null)} disabled={lvlSubmitting}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectModal && (
+        <div className="modal-overlay" onClick={() => !rejecting && setRejectModal(null)}>
+          <div className="modal modal-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Reject bidder</h3>
+              <button type="button" className="modal-close" onClick={() => setRejectModal(null)} disabled={rejecting}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                <strong>{rejectModal.name}</strong> ({rejectModal.email}) will lose access to the platform. This cannot be undone from here; they would need admin support to return.
+              </p>
+              <div className="form-row">
+                <label>Reason *</label>
+                <textarea
+                  rows={4}
+                  placeholder="Explain why this bidder is being removed…"
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  disabled={rejecting}
+                  className="lvl-modal-textarea"
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={rejecting || !rejectReason.trim()}
+                  onClick={confirmRejectBidder}
+                >
+                  {rejecting ? 'Rejecting…' : 'Confirm rejection'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setRejectModal(null)} disabled={rejecting}>
                   Cancel
                 </button>
               </div>

@@ -74,7 +74,7 @@ export default function ProfilePage({ onSaved }) {
           state: u.state || ''
         })
         setCurrentWallet(u.usdtErc20Wallet || '')
-        loadPhoto()
+        if (u.role !== 'client') loadPhoto()
       })
       .catch(() => setError('Failed to load profile'))
       .finally(() => setLoading(false))
@@ -89,8 +89,8 @@ export default function ProfilePage({ onSaved }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    loadWalletPending()
-  }, [loadWalletPending])
+    if (meta.role && meta.role !== 'client') loadWalletPending()
+  }, [meta.role, loadWalletPending])
 
   useEffect(() => {
     return () => {
@@ -143,10 +143,16 @@ export default function ProfilePage({ onSaved }) {
       if (photoFile) fd.append('photo', photoFile)
 
       await api.patch('/auth/profile', fd)
+      if (meta.role === 'client') {
+        const display = [form.legalFirstName, form.legalMiddleName, form.legalLastName].filter(Boolean).join(' ').trim()
+        if (display) {
+          await api.patch('/clients/me', { name: display }).catch(() => {})
+        }
+      }
       setSuccess('Profile saved successfully.')
       setPhotoFile(null)
       setForm(f => ({ ...f, currentPassword: '', newPassword: '' }))
-      loadPhoto()
+      if (meta.role !== 'client') loadPhoto()
       const me = await api.get('/auth/me')
       setCurrentWallet(me.data.user?.usdtErc20Wallet || '')
       if (onSaved) onSaved()
@@ -163,7 +169,11 @@ export default function ProfilePage({ onSaved }) {
     <div className="page">
       <div className="page-header">
         <h2>My profile</h2>
-        <p className="page-desc">Manage your personal information and documents. USDT payout wallet changes require admin or finance approval.</p>
+        <p className="page-desc">
+          {meta.role === 'client'
+            ? 'Update your name and password. Manage investigation profiles from My profiles.'
+            : 'Manage your personal information and documents. USDT payout wallet changes require admin or finance approval.'}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -187,12 +197,14 @@ export default function ProfilePage({ onSaved }) {
                 )}
               </div>
             </div>
-            <div className="profile-upload-area">
-              <label className="upload-label" onClick={() => photoRef.current?.click()}>
-                <span>{photoFile ? photoFile.name : 'Change photo'}</span>
-              </label>
-              <input ref={photoRef} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} />
-            </div>
+            {meta.role !== 'client' && (
+              <div className="profile-upload-area">
+                <label className="upload-label" onClick={() => photoRef.current?.click()}>
+                  <span>{photoFile ? photoFile.name : 'Change photo'}</span>
+                </label>
+                <input ref={photoRef} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} />
+              </div>
+            )}
           </div>
 
           {/* ── Main form ── */}
@@ -210,11 +222,12 @@ export default function ProfilePage({ onSaved }) {
                 </div>
                 <div className="form-row">
                   <label>Last name</label>
-                  <input type="text" value={form.legalLastName} onChange={e => setField('legalLastName', e.target.value)} required />
+                  <input type="text" value={form.legalLastName} onChange={e => setField('legalLastName', e.target.value)} required={meta.role !== 'client'} />
                 </div>
               </div>
             </div>
 
+            {meta.role !== 'client' && (
             <div className="profile-section">
               <h4 className="profile-section-title">Contact</h4>
               <div className="profile-fields profile-fields-2">
@@ -224,7 +237,9 @@ export default function ProfilePage({ onSaved }) {
                 </div>
               </div>
             </div>
+            )}
 
+            {meta.role !== 'client' && (
             <div className="profile-section">
               <h4 className="profile-section-title">Social</h4>
               <div className="profile-fields profile-fields-2">
@@ -238,7 +253,9 @@ export default function ProfilePage({ onSaved }) {
                 </div>
               </div>
             </div>
+            )}
 
+            {meta.role !== 'client' && (
             <div className="profile-section">
               <h4 className="profile-section-title">Address</h4>
               <div className="profile-fields">
@@ -262,7 +279,9 @@ export default function ProfilePage({ onSaved }) {
                 </div>
               </div>
             </div>
+            )}
 
+            {meta.role !== 'client' && (
             <div className="profile-section">
               <h4 className="profile-section-title">ERC-20 payout wallet</h4>
               <p className="text-muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
@@ -326,6 +345,7 @@ export default function ProfilePage({ onSaved }) {
                 </div>
               )}
             </div>
+            )}
 
             <div className="profile-section">
               <h4 className="profile-section-title">Change password</h4>

@@ -8,13 +8,16 @@ import BidManagerDashboard from './pages/BidManagerDashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import BidderDashboard from './pages/BidderDashboard'
 import OpsLeadAssignments from './pages/OpsLeadAssignments'
-import OpsLeadProfiles from './pages/OpsLeadProfiles'
+import AdminClientsProfiles from './pages/AdminClientsProfiles'
 import OpsLeadPaymentRequests from './pages/OpsLeadPaymentRequests'
 import OpsLeadOnboarding from './pages/OpsLeadOnboarding'
 import FinancialDashboard from './pages/FinancialDashboard'
 import ProfilePage from './pages/ProfilePage'
 import PaymentHistoryPage from './pages/PaymentHistoryPage'
 import CompanyOrg from './pages/CompanyOrg'
+import ClientProfiles from './pages/ClientProfiles'
+import ClientPayoutApprovals from './pages/ClientPayoutApprovals'
+import ClientPendingApproval from './pages/ClientPendingApproval'
 import './App.css'
 
 function App() {
@@ -93,6 +96,25 @@ function App() {
     )
   }
 
+  const clientAwaitingAdmin = user.role === 'client' && user.status === 'pending_admin'
+
+  if (clientAwaitingAdmin) {
+    return (
+      <Routes>
+        <Route
+          path="*"
+          element={(
+            <ClientPendingApproval
+              user={user}
+              onLogout={onLogout}
+              onRecheck={refreshUser}
+            />
+          )}
+        />
+      </Routes>
+    )
+  }
+
   return (
     <Layout user={user} onLogout={onLogout}>
       <Routes>
@@ -101,6 +123,7 @@ function App() {
           user.role === 'financial_manager' ? <Navigate to="/financial" /> :
           user.role === 'bidder' ? <Navigate to="/bidder" /> :
           user.role === 'ops_lead' ? <Navigate to="/ops-lead/assignments" /> :
+          user.role === 'client' ? <Navigate to="/client" /> :
           <Navigate to="/bid-manager" />
         } />
         <Route path="/bid-manager" element={
@@ -119,7 +142,7 @@ function App() {
           user.role === 'ops_lead' ? <OpsLeadAssignments /> : <Navigate to="/" />
         } />
         <Route path="/ops-lead/profiles" element={
-          user.role === 'ops_lead' ? <OpsLeadProfiles /> : <Navigate to="/" />
+          user.role === 'ops_lead' ? <AdminClientsProfiles isOpsLead /> : <Navigate to="/" />
         } />
         <Route path="/ops-lead/payment-requests" element={
           user.role === 'ops_lead' ? <OpsLeadPaymentRequests /> : <Navigate to="/" />
@@ -131,8 +154,18 @@ function App() {
           user.role === 'financial_manager' ? <FinancialDashboard /> : <Navigate to="/" />
         } />
         <Route path="/profile" element={<ProfilePage onSaved={refreshUser} />} />
-        <Route path="/company-org" element={<CompanyOrg />} />
-        <Route path="/payment-history" element={<PaymentHistoryPage />} />
+        <Route path="/client" element={
+          user.role === 'client' ? <ClientProfiles /> : <Navigate to="/" />
+        } />
+        <Route path="/client/payout-approvals" element={
+          user.role === 'client' ? <ClientPayoutApprovals /> : <Navigate to="/" />
+        } />
+        <Route path="/company-org" element={
+          user.role === 'client' ? <Navigate to="/" /> : <CompanyOrg />
+        } />
+        <Route path="/payment-history" element={
+          user.role === 'client' ? <Navigate to="/" /> : <PaymentHistoryPage />
+        } />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Layout>

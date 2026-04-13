@@ -3,28 +3,46 @@ import ImProfile from '../models/ImProfile.js';
 import Client from '../models/Client.js';
 import User from '../models/User.js';
 import Report, { WORKFLOW } from '../models/Report.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireRole, requireApprovedIfClient } from '../middleware/auth.js';
 
 const router = express.Router();
 
 const profilePopulate = [
   { path: 'opsLeadId', select: 'name email' },
   { path: 'assignedBidderId', select: 'name email bidManagerId' },
-  { path: 'clientId', select: 'name email opsLeadId' }
+  { path: 'clientId', select: 'name email userId' }
 ];
 
-async function opsOwnsBidder(opsLeadId, bidderId) {
-  const bidder = await User.findById(bidderId);
-  if (!bidder || bidder.role !== 'bidder') return false;
-  if (!bidder.bidManagerId) return false;
-  const bm = await User.findById(bidder.bidManagerId);
-  return bm && bm.opsLeadId?.toString() === opsLeadId.toString();
+/** Bidder IDs under this Ops Lead's bid managers */
+async function bidderIdsForOpsLead(opsLeadId) {
+  const bmIds = await User.find({
+    role: 'bid_manager',
+    status: 'approved',
+    opsLeadId
+  }).distinct('_id');
+  return User.find({
+    role: 'bidder',
+    status: 'approved',
+    bidManagerId: { $in: bmIds }
+  }).distinct('_id');
 }
 
-async function clientBelongsToOps(opsLeadId, clientId) {
-  if (!clientId) return false;
-  const client = await Client.findById(clientId);
-  return client && client.opsLeadId.toString() === opsLeadId.toString();
+/**
+ * Ops Lead sees:
+ *  - unassigned profiles (opsLeadId is null, assignedBidderId is null)
+ *  - profiles already assigned to their team (opsLeadId === them)
+ */
+async function opsLeadProfileFilter(opsLeadId) {
+  return {
+    $or: [
+      { opsLeadId: null, assignedBidderId: null },
+      { opsLeadId: opsLeadId }
+    ]
+  };
+}
+
+async function getClientDocForUser(userId) {
+  return Client.findOne({ userId });
 }
 
 /** Bidder: all profiles assigned to them */
@@ -39,9 +57,26 @@ router.get('/me', authenticate, requireRole('bidder'), async (req, res) => {
   }
 });
 
+/** Client org: all profiles for their Client record */
+router.get('/client', authenticate, requireRole('client'), requireApprovedIfClient, async (req, res) => {
+  try {
+    const clientDoc = await getClientDocForUser(req.user._id);
+    if (!clientDoc) return res.status(404).json({ error: 'Client record not found' });
+    const profiles = await ImProfile.find({ clientId: clientDoc._id })
+      .populate(profilePopulate)
+      .sort({ updatedAt: -1 });
+    res.json(profiles);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/', authenticate, requireRole('ops_lead', 'admin'), async (req, res) => {
   try {
-    const filter = req.user.role === 'admin' ? {} : { opsLeadId: req.user._id };
+    let filter = {};
+    if (req.user.role === 'ops_lead') {
+      filter = await opsLeadProfileFilter(req.user._id);
+    }
     const profiles = await ImProfile.find(filter)
       .populate(profilePopulate)
       .sort({ updatedAt: -1 });
@@ -51,25 +86,26 @@ router.get('/', authenticate, requireRole('ops_lead', 'admin'), async (req, res)
   }
 });
 
-router.post('/', authenticate, requireRole('ops_lead', 'admin'), async (req, res) => {
+router.post('/', authenticate, requireApprovedIfClient, requireRole('ops_lead', 'admin', 'client'), async (req, res) => {
   try {
-    const { name, clientId, opsLeadId: bodyOpsId } = req.body;
+    const { name, clientId } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name required' });
     if (!clientId) {
       return res.status(400).json({ error: 'clientId is required' });
     }
-    let opsLeadId = req.user._id;
-    if (req.user.role === 'admin') {
-      if (!bodyOpsId) return res.status(400).json({ error: 'opsLeadId is required when creating a profile as admin' });
-      const ol = await User.findOne({ _id: bodyOpsId, role: 'ops_lead', status: 'approved' });
-      if (!ol) return res.status(400).json({ error: 'Invalid Ops Lead' });
-      opsLeadId = bodyOpsId;
+
+    const client = await Client.findById(clientId);
+    if (!client) return res.status(400).json({ error: 'Client not found' });
+
+    if (req.user.role === 'client') {
+      const mine = await getClientDocForUser(req.user._id);
+      if (!mine || String(mine._id) !== String(clientId)) {
+        return res.status(403).json({ error: 'You can only create profiles for your own organization' });
+      }
     }
-    const ok = await clientBelongsToOps(opsLeadId, clientId);
-    if (!ok) return res.status(400).json({ error: 'Client must belong to the selected Ops team' });
 
     const profile = await ImProfile.create({
-      opsLeadId,
+      opsLeadId: null,
       name: name.trim(),
       clientId
     });
@@ -81,32 +117,68 @@ router.post('/', authenticate, requireRole('ops_lead', 'admin'), async (req, res
   }
 });
 
-router.patch('/:id', authenticate, requireRole('ops_lead', 'admin'), async (req, res) => {
+async function findProfileForPatch(req) {
+  const { id } = req.params;
+  if (req.user.role === 'admin') {
+    return ImProfile.findById(id);
+  }
+  if (req.user.role === 'client') {
+    const clientDoc = await getClientDocForUser(req.user._id);
+    if (!clientDoc) return null;
+    return ImProfile.findOne({ _id: id, clientId: clientDoc._id });
+  }
+  if (req.user.role === 'ops_lead') {
+    const filter = await opsLeadProfileFilter(req.user._id);
+    return ImProfile.findOne({ _id: id, ...filter });
+  }
+  return null;
+}
+
+router.patch('/:id', authenticate, requireApprovedIfClient, requireRole('ops_lead', 'admin', 'client'), async (req, res) => {
   try {
-    const { name, assignedBidderId, clientId } = req.body;
-    const filter = req.user.role === 'admin'
-      ? { _id: req.params.id }
-      : { _id: req.params.id, opsLeadId: req.user._id };
-    const profile = await ImProfile.findOne(filter);
+    const profile = await findProfileForPatch(req);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const opsLeadId = profile.opsLeadId;
+    const { name, assignedBidderId, clientId } = req.body;
+
+    if (req.user.role === 'client') {
+      if (name != null) profile.name = String(name).trim();
+      if (assignedBidderId !== undefined || clientId !== undefined) {
+        return res.status(403).json({ error: 'Only Ops Leads can assign bidders or change client' });
+      }
+      await profile.save();
+      const populated = await ImProfile.findById(profile._id).populate(profilePopulate);
+      return res.json(populated);
+    }
 
     if (name != null) profile.name = String(name).trim();
 
     if (clientId != null) {
-      const ok = await clientBelongsToOps(opsLeadId, clientId);
-      if (!ok) return res.status(400).json({ error: 'Client must belong to this Ops team' });
+      const c = await Client.findById(clientId);
+      if (!c) return res.status(400).json({ error: 'Client not found' });
       profile.clientId = clientId;
     }
 
     if (assignedBidderId !== undefined) {
       if (assignedBidderId === null || assignedBidderId === '') {
         profile.assignedBidderId = null;
+        profile.opsLeadId = null;
       } else {
-        const ok = await opsOwnsBidder(opsLeadId, assignedBidderId);
-        if (!ok) return res.status(403).json({ error: 'You can only assign bidders on your bid managers' });
+        const bidder = await User.findById(assignedBidderId).select('bidManagerId');
+        if (!bidder?.bidManagerId) {
+          return res.status(400).json({ error: 'Bidder must have a bid manager' });
+        }
+        const bm = await User.findById(bidder.bidManagerId).select('opsLeadId');
+        if (!bm?.opsLeadId) {
+          return res.status(400).json({ error: 'Bid manager must be under an Ops Lead' });
+        }
+        if (req.user.role === 'ops_lead') {
+          if (String(bm.opsLeadId) !== String(req.user._id)) {
+            return res.status(403).json({ error: 'You can only assign bidders on your bid managers' });
+          }
+        }
         profile.assignedBidderId = assignedBidderId;
+        profile.opsLeadId = bm.opsLeadId;
       }
     }
 
@@ -119,12 +191,9 @@ router.patch('/:id', authenticate, requireRole('ops_lead', 'admin'), async (req,
   }
 });
 
-router.delete('/:id', authenticate, requireRole('ops_lead', 'admin'), async (req, res) => {
+router.delete('/:id', authenticate, requireApprovedIfClient, requireRole('ops_lead', 'admin', 'client'), async (req, res) => {
   try {
-    const filter = req.user.role === 'admin'
-      ? { _id: req.params.id }
-      : { _id: req.params.id, opsLeadId: req.user._id };
-    const profile = await ImProfile.findOne(filter);
+    const profile = await findProfileForPatch(req);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     const open = await Report.countDocuments({
       profileId: req.params.id,

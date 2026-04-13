@@ -1,10 +1,11 @@
 import mongoose from 'mongoose';
 
 const imProfileSchema = new mongoose.Schema({
+  /** Set when an Ops Lead creates the profile or when a bidder is assigned (from BM’s Ops Lead). Client-created profiles start null. */
   opsLeadId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    default: null
   },
   clientId: {
     type: mongoose.Schema.Types.ObjectId,

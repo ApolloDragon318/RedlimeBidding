@@ -1,12 +1,15 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import SalaryConfig, { SALARY_ROLES, SALARY_LEVELS } from '../models/SalaryConfig.js';
 import Report, { WORKFLOW } from '../models/Report.js';
 import User from '../models/User.js';
 import ImProfile from '../models/ImProfile.js';
+import Client from '../models/Client.js';
 import PaymentHistory from '../models/PaymentHistory.js';
 import PersonPayoutHistory from '../models/PersonPayoutHistory.js';
 import PayoutRequest from '../models/PayoutRequest.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import ProfilePayoutApproval from '../models/ProfilePayoutApproval.js';
+import { authenticate, requireRole, requireApprovedIfClient } from '../middleware/auth.js';
 
 const router = express.Router();
 const TAX_RATE = 0.10;
@@ -35,14 +38,49 @@ async function getUserRate(userId, rateMap) {
   return getRate(rateMap, user.role, user.level);
 }
 
+const PENDING_ANY_ROLE_UNPAID = [
+  { bidderPayoutPaidAt: { $exists: false } },
+  { bidderPayoutPaidAt: null },
+  { bmPayoutPaidAt: { $exists: false } },
+  { bmPayoutPaidAt: null },
+  { opsLeadPayoutPaidAt: { $exists: false } },
+  { opsLeadPayoutPaidAt: null }
+];
+
+async function filterReportsByProfileApproval(reports) {
+  if (!reports.length) return [];
+  const profileIds = [...new Set(reports.map(r => r.profileId).filter(Boolean))];
+  const noProfile = reports.filter(r => !r.profileId);
+  if (profileIds.length === 0) return noProfile;
+  const [docs, profiles] = await Promise.all([
+    ProfilePayoutApproval.find({ profileId: { $in: profileIds } }).lean(),
+    ImProfile.find({ _id: { $in: profileIds } }).select('clientId').lean()
+  ]);
+  const docMap = new Map(docs.map(d => [String(d.profileId), d]));
+  const profMap = new Map(profiles.map(p => [String(p._id), p]));
+  function isApproved(profileId) {
+    if (!profileId) return true;
+    const doc = docMap.get(String(profileId));
+    const prof = profMap.get(String(profileId));
+    if (!doc) return false;
+    const needsClient = !!prof?.clientId;
+    const adminOk = !!doc.adminApprovedAt;
+    const clientOk = !!doc.clientApprovedAt;
+    if (needsClient) return adminOk || clientOk;
+    return adminOk;
+  }
+  return reports.filter(r => (r.profileId ? isApproved(r.profileId) : true));
+}
+
 async function computeBidderBasePay(bidderId, rateMap) {
   const user = await User.findById(bidderId).select('role level');
   const rate = user ? getRate(rateMap, 'bidder', user.level) : 0;
-  const reports = await Report.find({
+  let reports = await Report.find({
     bidderId,
     workflowStatus: WORKFLOW.CONFIRMED,
     bidderPayoutPaidAt: { $exists: false }
   });
+  reports = await filterReportsByProfileApproval(reports);
   let base = 0;
   for (const r of reports) {
     base += (Number(r.bidCount) || 0) * rate + (Number(r.bidManagerBonus) || 0);
@@ -53,11 +91,12 @@ async function computeBidderBasePay(bidderId, rateMap) {
 async function computeBmBasePay(bmId, rateMap) {
   const user = await User.findById(bmId).select('role level');
   const profileRate = user ? getRate(rateMap, 'bid_manager', user.level) : 0;
-  const reports = await Report.find({
+  let reports = await Report.find({
     bidManagerId: bmId,
     workflowStatus: WORKFLOW.CONFIRMED,
     bmPayoutPaidAt: { $exists: false }
   });
+  reports = await filterReportsByProfileApproval(reports);
   let base = 0;
   /** Ops Lead bonus: one total per BM (stored on one report, 0 on others); sum rows so negatives work. */
   let opsBonusTotal = 0;
@@ -70,7 +109,8 @@ async function computeBmBasePay(bmId, rateMap) {
   return { base, reports, profileRate, opsBonusTotal };
 }
 
-async function computeOpsBasePay(opsLeadId, rateMap) {
+/** Unfiltered — used for client cost table / sync allocation math (must not depend on approval gates). */
+async function computeOpsBasePayRaw(opsLeadId, rateMap) {
   const bmIds = await User.find({ role: 'bid_manager', status: 'approved', opsLeadId }).distinct('_id');
   const reports = await Report.find({
     bidManagerId: { $in: bmIds },
@@ -82,6 +122,195 @@ async function computeOpsBasePay(opsLeadId, rateMap) {
   const opsRate = ol ? getRate(rateMap, 'ops_lead', ol.level) : 0;
   const base = profileCount * opsRate;
   return { base, reports, profileCount, opsRate };
+}
+
+async function computeOpsBasePay(opsLeadId, rateMap) {
+  const raw = await computeOpsBasePayRaw(opsLeadId, rateMap);
+  const reports = await filterReportsByProfileApproval(raw.reports);
+  const profileCount = reports.length;
+  const base = profileCount * raw.opsRate;
+  return { base, reports, profileCount, opsRate: raw.opsRate };
+}
+
+/**
+ * Same rules as POST /client-payout-table — adminBonuses from FM at payout time (often empty in sync).
+ * Rows include profileId, bmShare, opsShare for totals and admin tax view.
+ */
+async function buildPayoutRowsFromPendingReports(pendingReports, rateMap, adminBonuses) {
+  const bmCache = new Map();
+  const bidderCache = new Map();
+  const profileCache = new Map();
+
+  async function getBm(id) {
+    const k = String(id);
+    if (bmCache.has(k)) return bmCache.get(k);
+    const u = await User.findById(id).select('name level opsLeadId');
+    bmCache.set(k, u);
+    return u;
+  }
+  async function getBidder(id) {
+    if (!id) return null;
+    const k = String(id);
+    if (bidderCache.has(k)) return bidderCache.get(k);
+    const u = await User.findById(id).select('name level');
+    bidderCache.set(k, u);
+    return u;
+  }
+  async function getProfile(id) {
+    if (!id) return null;
+    const k = String(id);
+    if (profileCache.has(k)) return profileCache.get(k);
+    const p = await ImProfile.findById(id).populate('clientId', 'name email');
+    profileCache.set(k, p);
+    return p;
+  }
+
+  const opsTeamBonusByBm = new Map();
+  const profileCountByBm = new Map();
+  const profileCountByOps = new Map();
+  const bmToOps = new Map();
+
+  for (const r of pendingReports) {
+    const bmId = String(r.bidManagerId);
+    profileCountByBm.set(bmId, (profileCountByBm.get(bmId) || 0) + 1);
+    const ob = Number(r.opsLeadTeamBonus);
+    opsTeamBonusByBm.set(bmId, (opsTeamBonusByBm.get(bmId) || 0) + (Number.isFinite(ob) ? ob : 0));
+  }
+
+  for (const bmId of profileCountByBm.keys()) {
+    const bm = await getBm(bmId);
+    if (!bm?.opsLeadId) continue;
+    const olId = String(bm.opsLeadId);
+    bmToOps.set(bmId, olId);
+    profileCountByOps.set(olId, (profileCountByOps.get(olId) || 0) + profileCountByBm.get(bmId));
+  }
+
+  const opsLeads = await User.find({ role: 'ops_lead', status: 'approved' }).select('_id level');
+  const opsBasePerReport = new Map();
+  for (const ol of opsLeads) {
+    const { reports: opsReports, profileCount: opsProfCount, opsRate } = await computeOpsBasePayRaw(ol._id, rateMap);
+    const opsTotal = opsProfCount * opsRate;
+    const perReport = opsReports.length > 0 ? opsTotal / opsReports.length : 0;
+    opsBasePerReport.set(String(ol._id), perReport);
+  }
+
+  const sortedPending = [...pendingReports].sort((a, b) => {
+    const c = String(a.bidManagerId).localeCompare(String(b.bidManagerId));
+    if (c !== 0) return c;
+    return String(a._id).localeCompare(String(b._id));
+  });
+
+  const rows = [];
+  for (const r of sortedPending) {
+    const bmIdStr = String(r.bidManagerId);
+    const olId = bmToOps.get(bmIdStr);
+    if (!olId) continue;
+    const bm = await getBm(r.bidManagerId);
+    const bidder = await getBidder(r.bidderId);
+    const bidderRate = bidder ? getRate(rateMap, 'bidder', bidder.level) : 0;
+    const bmToBidderBonus = Number(r.bidManagerBonus) || 0;
+    const bidderPay = (Number(r.bidCount) || 0) * bidderRate + Math.max(0, bmToBidderBonus);
+    const profileRate = getRate(rateMap, 'bid_manager', bm.level);
+    const bmCount = profileCountByBm.get(bmIdStr) || 1;
+    const opsTeamBonusRaw = opsTeamBonusByBm.get(bmIdStr) || 0;
+    const opsTeamBonusPerProfile = opsTeamBonusRaw > 0 ? opsTeamBonusRaw / bmCount : 0;
+    const adminBmBonusRaw = Number(adminBonuses[bmIdStr]) || 0;
+    const adminBmBonusPerProfile = adminBmBonusRaw > 0 ? adminBmBonusRaw / bmCount : 0;
+    const opsBasePR = opsBasePerReport.get(olId) || 0;
+    const opsCount = profileCountByOps.get(olId) || 1;
+    const adminOpsBonusRaw = Number(adminBonuses[olId]) || 0;
+    const adminOpsBonusPerProfile = adminOpsBonusRaw > 0 ? adminOpsBonusRaw / opsCount : 0;
+    const bmShare = profileRate + opsTeamBonusPerProfile + adminBmBonusPerProfile;
+    const opsShare = opsBasePR + adminOpsBonusPerProfile;
+    const profilePay = bmShare + opsShare;
+    const total = bidderPay + profilePay;
+    const profileDoc = await getProfile(r.profileId);
+    const clientName = profileDoc?.clientId?.name || 'Unknown';
+    const clientIdStr = profileDoc?.clientId?._id ? String(profileDoc.clientId._id) : 'unknown';
+    rows.push({
+      reportId: r._id,
+      profileId: r.profileId,
+      clientId: clientIdStr,
+      clientName,
+      profileName: r.profileName,
+      bidderName: bidder?.name || r.bidderName,
+      bidManagerName: bm.name,
+      bidderPay: Number(bidderPay.toFixed(2)),
+      bmShare: Number(bmShare.toFixed(2)),
+      opsShare: Number(opsShare.toFixed(2)),
+      profilePay: Number(profilePay.toFixed(2)),
+      total: Number(total.toFixed(2))
+    });
+  }
+  return rows;
+}
+
+/** Upsert ProfilePayoutApproval per profile with unpaid confirmed reports; reset approvals when report set changes. */
+async function syncProfilePayoutApprovals() {
+  const rateMap = await loadRateMap();
+  const pendingReports = await Report.find({
+    workflowStatus: WORKFLOW.CONFIRMED,
+    $or: PENDING_ANY_ROLE_UNPAID
+  }).lean();
+
+  const groups = new Map();
+  for (const r of pendingReports) {
+    if (!r.profileId) continue;
+    const k = String(r.profileId);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+
+  const rows = await buildPayoutRowsFromPendingReports(pendingReports, rateMap, {});
+  const byProfile = new Map();
+  for (const row of rows) {
+    if (!row.profileId) continue;
+    const k = String(row.profileId);
+    if (!byProfile.has(k)) byProfile.set(k, { clientSum: 0, workerSum: 0 });
+    const o = byProfile.get(k);
+    o.clientSum += row.total;
+    o.workerSum += row.bidderPay + row.profilePay;
+  }
+
+  const activeIds = [...groups.keys()].map(id => new mongoose.Types.ObjectId(id));
+  if (activeIds.length === 0) {
+    await ProfilePayoutApproval.deleteMany({});
+    return;
+  }
+  await ProfilePayoutApproval.deleteMany({ profileId: { $nin: activeIds } });
+
+  for (const [pidStr, reps] of groups) {
+    const sorted = [...reps].sort((a, b) => String(a._id).localeCompare(String(b._id)));
+    const sig = sorted.map(r => String(r._id)).join(',');
+    const first = sorted[0];
+    const bm = await User.findById(first.bidManagerId).select('opsLeadId').lean();
+    if (!bm?.opsLeadId) continue;
+    const sums = byProfile.get(pidStr) || { clientSum: 0, workerSum: 0 };
+    let doc = await ProfilePayoutApproval.findOne({ profileId: pidStr });
+    if (!doc) {
+      await ProfilePayoutApproval.create({
+        profileId: new mongoose.Types.ObjectId(pidStr),
+        opsLeadId: bm.opsLeadId,
+        reportIds: sorted.map(r => r._id),
+        reportIdsSignature: sig,
+        clientVisibleTotal: Number(sums.clientSum.toFixed(2)),
+        workerGrossTotal: Number(sums.workerSum.toFixed(2))
+      });
+    } else {
+      if (doc.reportIdsSignature !== sig) {
+        doc.clientApprovedAt = null;
+        doc.clientApprovedBy = null;
+        doc.adminApprovedAt = null;
+        doc.adminApprovedBy = null;
+      }
+      doc.reportIds = sorted.map(r => r._id);
+      doc.reportIdsSignature = sig;
+      doc.opsLeadId = bm.opsLeadId;
+      doc.clientVisibleTotal = Number(sums.clientSum.toFixed(2));
+      doc.workerGrossTotal = Number(sums.workerSum.toFixed(2));
+      await doc.save();
+    }
+  }
 }
 
 /** GET / — return the full role×level rate grid */
@@ -135,6 +364,7 @@ router.put('/rate', authenticate, requireRole('admin', 'financial_manager'), asy
 
 router.get('/payout-queue', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const rateMap = await loadRateMap();
     const tree = [];
     const flatRows = [];
@@ -210,11 +440,7 @@ router.get('/payout-queue', authenticate, requireRole('admin', 'financial_manage
       }
     }
 
-    const confirmedOpsReqs = await PayoutRequest.find({ status: 'confirmed', role: 'ops_lead' }).lean();
-    const confirmedOpsIds = new Set(confirmedOpsReqs.map(r => String(r.userId)));
-    const filteredTree = tree.filter(ops => confirmedOpsIds.has(String(ops.userId)));
-
-    res.json({ tree: filteredTree, rows: flatRows, taxRate: TAX_RATE });
+    res.json({ tree, rows: flatRows, taxRate: TAX_RATE });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -233,144 +459,17 @@ router.get('/payout-queue', authenticate, requireRole('admin', 'financial_manage
  */
 router.post('/client-payout-table', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const rateMap = await loadRateMap();
     const adminBonuses = req.body.adminBonuses && typeof req.body.adminBonuses === 'object'
       ? req.body.adminBonuses : {};
 
     const pendingReports = await Report.find({
       workflowStatus: WORKFLOW.CONFIRMED,
-      $or: [
-        { bidderPayoutPaidAt: { $exists: false } },
-        { bidderPayoutPaidAt: null },
-        { bmPayoutPaidAt: { $exists: false } },
-        { bmPayoutPaidAt: null },
-        { opsLeadPayoutPaidAt: { $exists: false } },
-        { opsLeadPayoutPaidAt: null }
-      ]
+      $or: PENDING_ANY_ROLE_UNPAID
     }).lean();
 
-    const bmCache = new Map();
-    const bidderCache = new Map();
-    const profileCache = new Map();
-
-    async function getBm(id) {
-      const k = String(id);
-      if (bmCache.has(k)) return bmCache.get(k);
-      const u = await User.findById(id).select('name level opsLeadId');
-      bmCache.set(k, u);
-      return u;
-    }
-    async function getBidder(id) {
-      if (!id) return null;
-      const k = String(id);
-      if (bidderCache.has(k)) return bidderCache.get(k);
-      const u = await User.findById(id).select('name level');
-      bidderCache.set(k, u);
-      return u;
-    }
-    async function getProfile(id) {
-      if (!id) return null;
-      const k = String(id);
-      if (profileCache.has(k)) return profileCache.get(k);
-      const p = await ImProfile.findById(id).populate('clientId', 'name email');
-      profileCache.set(k, p);
-      return p;
-    }
-
-    /* ── Pre-compute profile counts and bonus totals ── */
-
-    // Ops Lead team bonus per BM (sum of opsLeadTeamBonus on reports)
-    const opsTeamBonusByBm = new Map();
-    // Number of profiles (pending reports) per BM
-    const profileCountByBm = new Map();
-    // Number of profiles per Ops Lead
-    const profileCountByOps = new Map();
-    // Map bmId → opsLeadId
-    const bmToOps = new Map();
-
-    for (const r of pendingReports) {
-      const bmId = String(r.bidManagerId);
-      profileCountByBm.set(bmId, (profileCountByBm.get(bmId) || 0) + 1);
-
-      const ob = Number(r.opsLeadTeamBonus);
-      opsTeamBonusByBm.set(bmId, (opsTeamBonusByBm.get(bmId) || 0) + (Number.isFinite(ob) ? ob : 0));
-    }
-
-    // Resolve opsLeadId for each BM and count profiles per Ops Lead
-    for (const bmId of profileCountByBm.keys()) {
-      const bm = await getBm(bmId);
-      if (!bm?.opsLeadId) continue;
-      const olId = String(bm.opsLeadId);
-      bmToOps.set(bmId, olId);
-      profileCountByOps.set(olId, (profileCountByOps.get(olId) || 0) + profileCountByBm.get(bmId));
-    }
-
-    // Ops base pay per report (ops rate × profiles, divided across all reports = opsRate)
-    const opsLeads = await User.find({ role: 'ops_lead', status: 'approved' }).select('_id level');
-    const opsBasePerReport = new Map();
-    for (const ol of opsLeads) {
-      const { reports: opsReports, profileCount: opsProfCount, opsRate } = await computeOpsBasePay(ol._id, rateMap);
-      const opsTotal = opsProfCount * opsRate;
-      const perReport = opsReports.length > 0 ? opsTotal / opsReports.length : 0;
-      opsBasePerReport.set(String(ol._id), perReport);
-    }
-
-    /* ── Build rows ── */
-
-    const sortedPending = [...pendingReports].sort((a, b) => {
-      const c = String(a.bidManagerId).localeCompare(String(b.bidManagerId));
-      if (c !== 0) return c;
-      return String(a._id).localeCompare(String(b._id));
-    });
-
-    const rows = [];
-    for (const r of sortedPending) {
-      const bmIdStr = String(r.bidManagerId);
-      const olId = bmToOps.get(bmIdStr);
-      if (!olId) continue;
-      const bm = await getBm(r.bidManagerId);
-      const bidder = await getBidder(r.bidderId);
-      const bidderRate = bidder ? getRate(rateMap, 'bidder', bidder.level) : 0;
-
-      // Bidder pay: negative BM-to-bidder bonus excluded
-      const bmToBidderBonus = Number(r.bidManagerBonus) || 0;
-      const bidderPay = (Number(r.bidCount) || 0) * bidderRate + Math.max(0, bmToBidderBonus);
-
-      // BM line: profileRate + evenly-spread positive opsLeadTeamBonus + evenly-spread positive admin BM bonus
-      const profileRate = getRate(rateMap, 'bid_manager', bm.level);
-      const bmCount = profileCountByBm.get(bmIdStr) || 1;
-
-      const opsTeamBonusRaw = opsTeamBonusByBm.get(bmIdStr) || 0;
-      const opsTeamBonusPerProfile = opsTeamBonusRaw > 0 ? opsTeamBonusRaw / bmCount : 0;
-
-      const adminBmBonusRaw = Number(adminBonuses[bmIdStr]) || 0;
-      const adminBmBonusPerProfile = adminBmBonusRaw > 0 ? adminBmBonusRaw / bmCount : 0;
-
-      // Ops line: base per report + evenly-spread positive admin Ops bonus
-      const opsBasePR = opsBasePerReport.get(olId) || 0;
-      const opsCount = profileCountByOps.get(olId) || 1;
-      const adminOpsBonusRaw = Number(adminBonuses[olId]) || 0;
-      const adminOpsBonusPerProfile = adminOpsBonusRaw > 0 ? adminOpsBonusRaw / opsCount : 0;
-
-      const profilePay = profileRate + opsTeamBonusPerProfile + adminBmBonusPerProfile + opsBasePR + adminOpsBonusPerProfile;
-      const total = bidderPay + profilePay;
-
-      const profileDoc = await getProfile(r.profileId);
-      const clientName = profileDoc?.clientId?.name || 'Unknown';
-      const clientIdStr = profileDoc?.clientId?._id ? String(profileDoc.clientId._id) : 'unknown';
-
-      rows.push({
-        reportId: r._id,
-        clientId: clientIdStr,
-        clientName,
-        profileName: r.profileName,
-        bidderName: bidder?.name || r.bidderName,
-        bidManagerName: bm.name,
-        bidderPay: Number(bidderPay.toFixed(2)),
-        profilePay: Number(profilePay.toFixed(2)),
-        total: Number(total.toFixed(2))
-      });
-    }
+    const rows = await buildPayoutRowsFromPendingReports(pendingReports, rateMap, adminBonuses);
 
     const summaryMap = new Map();
     for (const row of rows) {
@@ -396,6 +495,7 @@ router.post('/client-payout-table', authenticate, requireRole('admin', 'financia
 
 router.post('/pay/:userId', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const { adminBonus, txId } = req.body;
     let tx = txId != null ? String(txId).trim() : '';
     if (!tx) return res.status(400).json({ error: 'TxID is required to record this payment' });
@@ -428,13 +528,6 @@ router.post('/pay/:userId', authenticate, requireRole('admin', 'financial_manage
     if (totalPay <= 0) return res.status(400).json({ error: 'Nothing to pay (total must be > 0)' });
     if (!user.usdtErc20Wallet) return res.status(400).json({ error: 'User has no USDT wallet address on file' });
 
-    const awaitingConfirm = await PayoutRequest.findOne({ userId: user._id, status: 'pending' });
-    if (awaitingConfirm) {
-      return res.status(400).json({
-        error: 'This person has a payout request that is not confirmed yet. Confirm it under Payout requests (or decline it) before paying.'
-      });
-    }
-
     const ids = reportsToMark.map(r => r._id);
     if (user.role === 'bidder') {
       await Report.updateMany({ _id: { $in: ids } }, { $set: { bidderPayoutPaidAt: new Date() } });
@@ -454,7 +547,7 @@ router.post('/pay/:userId', authenticate, requireRole('admin', 'financial_manage
     });
 
     await PayoutRequest.updateMany(
-      { userId: user._id, status: 'confirmed' },
+      { userId: user._id, status: { $in: ['pending', 'confirmed'] } },
       { $set: { status: 'fulfilled', fulfilledAt: new Date() } }
     );
 
@@ -466,6 +559,7 @@ router.post('/pay/:userId', authenticate, requireRole('admin', 'financial_manage
 
 router.get('/expected-pay', authenticate, requireRole('bid_manager'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const rateMap = await loadRateMap();
     const { base, reports, profileRate, opsBonusTotal } = await computeBmBasePay(req.user._id, rateMap);
     const sorted = [...reports].sort((a, b) => String(a._id).localeCompare(String(b._id)));
@@ -497,6 +591,7 @@ router.get('/expected-pay', authenticate, requireRole('bid_manager'), async (req
 
 router.get('/expected-pay-bidder', authenticate, requireRole('bidder'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const rateMap = await loadRateMap();
     const { base, reports, rate: bidderRate } = await computeBidderBasePay(req.user._id, rateMap);
     const perProfile = reports.map(r => {
@@ -523,6 +618,7 @@ router.get('/expected-pay-bidder', authenticate, requireRole('bidder'), async (r
 
 router.get('/expected-pay-ops-lead', authenticate, requireRole('ops_lead'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const rateMap = await loadRateMap();
     const { base, profileCount, opsRate, reports } = await computeOpsBasePay(req.user._id, rateMap);
     const { tax, net } = applyTax(base);
@@ -557,6 +653,7 @@ router.get('/my-payments', authenticate, async (req, res) => {
 
 router.post('/request-payout', authenticate, requireRole('bidder', 'bid_manager', 'ops_lead'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const rateMap = await loadRateMap();
@@ -567,8 +664,13 @@ router.post('/request-payout', authenticate, requireRole('bidder', 'bid_manager'
     if (base <= 0) return res.status(400).json({ error: 'No unpaid balance to request.' });
     const open = await PayoutRequest.findOne({ userId: user._id, status: { $in: ['pending', 'confirmed'] } });
     if (open) return res.status(400).json({ error: 'You already have an open payout request (awaiting confirmation or payment).' });
-    await PayoutRequest.create({ userId: user._id, role: user.role, status: 'pending' });
-    res.json({ message: 'Request submitted. Admin or Financial manager will review.' });
+    await PayoutRequest.create({
+      userId: user._id,
+      role: user.role,
+      status: 'confirmed',
+      confirmedAt: new Date()
+    });
+    res.json({ message: 'Request submitted. Per-profile approval (client or admin/FM when the profile has a client) is still required before payout.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -576,6 +678,7 @@ router.post('/request-payout', authenticate, requireRole('bidder', 'bid_manager'
 
 router.get('/payout-requests', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
+    await syncProfilePayoutApprovals();
     const requests = await PayoutRequest.find({ status: { $in: ['pending', 'confirmed'] } })
       .populate('userId', 'name email role')
       .populate('confirmedBy', 'name email')
@@ -705,4 +808,94 @@ router.get('/payout-request/me', authenticate, requireRole('bidder', 'bid_manage
   }
 });
 
+router.get('/profile-payout-approvals', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    await syncProfilePayoutApprovals();
+    const list = await ProfilePayoutApproval.find({})
+      .populate('profileId', 'name clientId')
+      .populate('opsLeadId', 'name email')
+      .populate('clientApprovedBy', 'name email')
+      .populate('adminApprovedBy', 'name email')
+      .sort({ updatedAt: -1 })
+      .lean();
+    const approvals = list.map(a => {
+      const wg = Number(a.workerGrossTotal) || 0;
+      const { tax, net } = applyTax(wg);
+      return {
+        ...a,
+        taxRate: TAX_RATE,
+        taxAmount: tax,
+        netAfterTax: net
+      };
+    });
+    res.json({ approvals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/profile-payout-approvals/me', authenticate, requireRole('client'), requireApprovedIfClient, async (req, res) => {
+  try {
+    await syncProfilePayoutApprovals();
+    const clientDoc = await Client.findOne({ userId: req.user._id });
+    if (!clientDoc) return res.json({ approvals: [] });
+    const profiles = await ImProfile.find({ clientId: clientDoc._id }).select('_id').lean();
+    const pids = profiles.map(p => p._id);
+    const list = await ProfilePayoutApproval.find({ profileId: { $in: pids } })
+      .populate('profileId', 'name')
+      .populate('opsLeadId', 'name')
+      .sort({ updatedAt: -1 })
+      .lean();
+    const approvals = list.map(a => ({
+      _id: a._id,
+      profileId: a.profileId,
+      profileName: a.profileId?.name,
+      opsLeadName: a.opsLeadId?.name,
+      totalAmount: a.clientVisibleTotal,
+      reportCount: (a.reportIds || []).length,
+      clientApprovedAt: a.clientApprovedAt,
+      adminApprovedAt: a.adminApprovedAt,
+      canApprove: !(a.clientApprovedAt || a.adminApprovedAt)
+    }));
+    res.json({ approvals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/profile-payout-approvals/:id/client-approve', authenticate, requireRole('client'), requireApprovedIfClient, async (req, res) => {
+  try {
+    await syncProfilePayoutApprovals();
+    const clientDoc = await Client.findOne({ userId: req.user._id });
+    if (!clientDoc) return res.status(403).json({ error: 'No client account linked' });
+    const doc = await ProfilePayoutApproval.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    const prof = await ImProfile.findById(doc.profileId);
+    if (!prof || String(prof.clientId) !== String(clientDoc._id)) {
+      return res.status(403).json({ error: 'Not your profile' });
+    }
+    doc.clientApprovedAt = new Date();
+    doc.clientApprovedBy = req.user._id;
+    await doc.save();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/profile-payout-approvals/:id/admin-approve', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    await syncProfilePayoutApprovals();
+    const doc = await ProfilePayoutApproval.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    doc.adminApprovedAt = new Date();
+    doc.adminApprovedBy = req.user._id;
+    await doc.save();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+export { syncProfilePayoutApprovals };
 export default router;

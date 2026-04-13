@@ -54,7 +54,29 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
         console.log('Dropped legacy opsLeadId_1_name_1 index from improfiles');
       } catch (_) { /* index already gone */ }
 
-      /** Merge legacy InvestigationManager docs into Client (same business context), then remove IM collection. */
+      try {
+        await db.collection('clients').dropIndex('opsLeadId_1_name_1');
+        console.log('Dropped legacy opsLeadId_1_name_1 index from clients');
+      } catch (_) { /* index already gone */ }
+
+      try {
+        await Client.syncIndexes();
+      } catch (e) {
+        console.warn('Client.syncIndexes:', e.message);
+      }
+
+      /** Strip legacy opsLeadId from existing Client docs. */
+      try {
+        const r = await db.collection('clients').updateMany(
+          { opsLeadId: { $exists: true } },
+          { $unset: { opsLeadId: '' } }
+        );
+        if (r.modifiedCount > 0) console.log(`Removed opsLeadId from ${r.modifiedCount} client doc(s)`);
+      } catch (e) {
+        console.warn('Client opsLeadId cleanup:', e.message);
+      }
+
+      /** Merge legacy InvestigationManager docs into Client, then drop the collection. */
       try {
         const imCol = db.collection('investigationmanagers');
         const profCol = db.collection('improfiles');
@@ -62,8 +84,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
         if (imCount > 0) {
           const ims = await imCol.find({}).toArray();
           for (const im of ims) {
-            const oid = im.opsLeadId;
-            const existing = await Client.findOne({ opsLeadId: oid, name: im.name });
+            const existing = await Client.findOne({ name: im.name });
             if (existing) {
               if (im.email && !existing.email) {
                 existing.email = im.email;
@@ -72,8 +93,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
             } else {
               await Client.create({
                 name: im.name,
-                email: (im.email || '').trim(),
-                opsLeadId: oid
+                email: (im.email || '').trim()
               });
             }
           }
@@ -102,15 +122,15 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/redlime-b
           { clientId: null }
         ]
       });
-      for (const p of legacyProfiles) {
-        let client = await Client.findOne({ opsLeadId: p.opsLeadId, name: 'Legacy client' });
-        if (!client) {
-          client = await Client.create({ name: 'Legacy client', email: '', opsLeadId: p.opsLeadId });
-        }
-        p.clientId = client._id;
-        await p.save();
-      }
       if (legacyProfiles.length > 0) {
+        let legacyClient = await Client.findOne({ name: 'Legacy client' });
+        if (!legacyClient) {
+          legacyClient = await Client.create({ name: 'Legacy client', email: '' });
+        }
+        for (const p of legacyProfiles) {
+          p.clientId = legacyClient._id;
+          await p.save();
+        }
         console.log(`Migrated ${legacyProfiles.length} profile(s) with default client`);
       }
     }

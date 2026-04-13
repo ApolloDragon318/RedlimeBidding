@@ -13,6 +13,7 @@ import {
   UPLOADS_ROOT
 } from '../middleware/uploadOnboarding.js';
 import WalletChangeRequest from '../models/WalletChangeRequest.js';
+import Client from '../models/Client.js';
 
 const router = express.Router();
 const uploadsRootResolved = path.resolve(UPLOADS_ROOT);
@@ -52,6 +53,58 @@ function userResponse(user) {
   };
 }
 
+function escapeRegexAuth(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Client org signup — email, password, first name, last name (optional). Creates User + Client. */
+router.post('/register-client', async (req, res) => {
+  try {
+    const { email, password, firstName, lastName } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    if (!firstName?.trim()) {
+      return res.status(400).json({ error: 'First name is required' });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) {
+      return res.status(400).json({
+        error: 'This email is already registered. Sign in with your existing account — you cannot create a second account.'
+      });
+    }
+    const first = firstName.trim();
+    const last = (lastName || '').trim();
+    const displayName = [first, last].filter(Boolean).join(' ') || (normalizedEmail.split('@')[0] || 'Client');
+    const user = await User.create({
+      email: normalizedEmail,
+      password,
+      name: displayName,
+      legalFirstName: first,
+      legalLastName: last,
+      role: 'client',
+      status: 'pending_admin'
+    });
+    await Client.create({
+      name: displayName,
+      email: normalizedEmail,
+      userId: user._id
+    });
+    const token = issueToken(user._id);
+    res.status(201).json({
+      token,
+      user: userResponse(user),
+      message: 'Account created. An administrator will approve your organization before you can use the app.'
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /** Step 1: email + password only — then client continues to POST /complete-onboarding */
 router.post('/register', async (req, res) => {
   try {
@@ -64,7 +117,11 @@ router.post('/register', async (req, res) => {
     }
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await User.findOne({ email: normalizedEmail });
-    if (existing) return res.status(400).json({ error: 'Email already registered' });
+    if (existing) {
+      return res.status(400).json({
+        error: 'This email is already registered. Sign in with your existing account — you cannot create a second account.'
+      });
+    }
 
     const local = normalizedEmail.split('@')[0] || 'User';
     const user = await User.create({
@@ -153,6 +210,23 @@ router.post('/complete-onboarding', authenticate, (req, res, next) => {
       });
     }
 
+    const addrNorm = address.trim().toLowerCase();
+    const walletDup = await User.findOne({
+      _id: { $ne: user._id },
+      usdtErc20Wallet: new RegExp(`^${escapeRegexAuth(raw)}$`, 'i')
+    }).select('address usdtErc20Wallet').lean();
+    if (walletDup) {
+      const otherAddr = (walletDup.address || '').trim().toLowerCase();
+      if (otherAddr === addrNorm) {
+        return res.status(400).json({
+          error: 'This address and ERC-20 wallet are already on file with another account. Sign in to your existing account or use a different wallet.'
+        });
+      }
+      return res.status(400).json({
+        error: 'This ERC-20 wallet is already registered with another account. Sign in to your existing account or use a different wallet.'
+      });
+    }
+
     const displayName = [legalFirstName.trim(), (legalMiddleName || '').trim(), legalLastName.trim()]
       .filter(Boolean)
       .join(' ');
@@ -215,6 +289,9 @@ router.patch('/profile', authenticate, (req, res, next) => {
     if (user.status === 'pending_onboarding') {
       return res.status(400).json({ error: 'Finish onboarding first (Profile wizard).' });
     }
+    if (user.role === 'client' && user.status !== 'approved') {
+      return res.status(403).json({ error: 'Your client account is pending administrator approval.' });
+    }
 
     const b = req.body;
     const str = (v) => (v === undefined || v === null ? undefined : String(v).trim());
@@ -275,6 +352,17 @@ router.post('/login', async (req, res) => {
     if (user.status === 'pending_onboarding') {
       const token = issueToken(user._id);
       return res.json({ token, user: userResponse(user) });
+    }
+    if (user.role === 'client' && user.status === 'pending_admin') {
+      const token = issueToken(user._id);
+      return res.json({ token, user: userResponse(user) });
+    }
+    if (user.status === 'rejected') {
+      return res.status(401).json({
+        error: user.rejectionReason?.trim()
+          ? `Account not approved: ${user.rejectionReason.trim()}`
+          : 'Your account access has been revoked. Contact support if you believe this is a mistake.'
+      });
     }
     if (user.status !== 'approved') {
       const msg = user.status === 'pending_ops'

@@ -128,8 +128,7 @@ async function seed() {
 
   const demoClient = await Client.create({
     name: 'Acme Corp',
-    email: 'contact@acme.example',
-    opsLeadId: opsLead._id
+    email: 'contact@acme.example'
   });
 
   await ImProfile.create([

@@ -104,8 +104,12 @@ router.get('/', authenticate, requireRole('admin', 'bid_manager'), async (req, r
   }
 });
 
-router.get('/ops-leads', authenticate, requireRole('admin'), async (req, res) => {
+router.get('/ops-leads', authenticate, requireRole('admin', 'ops_lead'), async (req, res) => {
   try {
+    if (req.user.role === 'ops_lead') {
+      const u = await User.findById(req.user._id).select('-password').lean();
+      return res.json(u ? [u] : []);
+    }
     const users = await User.find({ role: 'ops_lead', status: 'approved' }).select('-password').sort({ name: 1 });
     res.json(users);
   } catch (e) {
@@ -370,12 +374,50 @@ router.patch('/:id/approve', authenticate, requireRole('admin'), async (req, res
   }
 });
 
+/** True if this Ops Lead may manage this bidder (same rules as GET /users/bidders for ops_lead). */
+async function opsLeadManagesBidder(opsLeadId, bidder) {
+  if (!bidder || bidder.role !== 'bidder') return false;
+  const bmId = bidder.bidManagerId?._id || bidder.bidManagerId;
+  if (!bmId) return true;
+  const bm = await User.findById(bmId).select('opsLeadId');
+  return bm && String(bm.opsLeadId) === String(opsLeadId);
+}
+
 router.patch('/:id/reject', authenticate, requireRole('admin', 'ops_lead'), async (req, res) => {
   try {
     const { reason } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.status === 'approved') return res.status(400).json({ error: 'Cannot reject an approved user' });
+
+    if (req.user.role === 'ops_lead' && user.status === 'approved' && user.role === 'bidder') {
+      if (!reason?.trim()) {
+        return res.status(400).json({ error: 'Reason is required' });
+      }
+      const ok = await opsLeadManagesBidder(req.user._id, user);
+      if (!ok) {
+        return res.status(403).json({ error: 'You can only reject bidders on your team.' });
+      }
+      user.status = 'rejected';
+      user.rejectionReason = reason.trim().slice(0, 2000);
+      user.bidManagerId = null;
+      await user.save();
+      return res.json({ success: true, status: user.status });
+    }
+
+    if (user.status === 'approved') {
+      return res.status(400).json({ error: 'Cannot reject an approved user' });
+    }
+
+    if (req.user.role === 'admin' && user.role === 'client' && user.status === 'pending_admin') {
+      if (!reason?.trim()) {
+        return res.status(400).json({ error: 'Reason is required' });
+      }
+      user.status = 'rejected';
+      user.rejectionReason = reason.trim().slice(0, 2000);
+      await user.save();
+      return res.json({ success: true, status: user.status });
+    }
+
     if (req.user.role === 'ops_lead' && user.status !== 'pending_ops') {
       return res.status(403).json({
         error: 'Ops Lead can only reject applicants waiting in the Ops review queue (before they are sent to admin).'

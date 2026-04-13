@@ -3,6 +3,7 @@ import Report, { WORKFLOW } from '../models/Report.js';
 import User from '../models/User.js';
 import ImProfile from '../models/ImProfile.js';
 import PayoutRequest from '../models/PayoutRequest.js';
+import { syncProfilePayoutApprovals } from './salary.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -41,7 +42,13 @@ router.post('/', authenticate, requireRole('bidder'), async (req, res) => {
       return res.status(403).json({ error: 'That profile is not assigned to you' });
     }
     const bm = await User.findById(bidder.bidManagerId);
-    if (!bm?.opsLeadId || profile.opsLeadId.toString() !== bm.opsLeadId.toString()) {
+    if (!bm?.opsLeadId) {
+      return res.status(403).json({ error: 'That profile is not on your Ops team' });
+    }
+    if (!profile.opsLeadId) {
+      profile.opsLeadId = bm.opsLeadId;
+      await profile.save();
+    } else if (profile.opsLeadId.toString() !== bm.opsLeadId.toString()) {
       return res.status(403).json({ error: 'That profile is not on your Ops team' });
     }
 
@@ -232,9 +239,12 @@ router.post('/ops-lead/approve-all', authenticate, requireRole('ops_lead'), asyn
       await PayoutRequest.create({
         userId: req.user._id,
         role: 'ops_lead',
-        status: 'pending'
+        status: 'confirmed',
+        confirmedAt: new Date()
       });
     }
+
+    await syncProfilePayoutApprovals();
 
     const populated = await populateReport(Report.find({ _id: { $in: ids } }));
     res.json({ count: populated.length, reports: populated });
@@ -292,7 +302,13 @@ router.patch('/:id', authenticate, requireRole('bidder'), async (req, res) => {
       }
       const bidder = await User.findById(req.user._id);
       const bm = await User.findById(bidder.bidManagerId);
-      if (!bm?.opsLeadId || profile.opsLeadId.toString() !== bm.opsLeadId.toString()) {
+      if (!bm?.opsLeadId) {
+        return res.status(403).json({ error: 'That profile is not on your Ops team' });
+      }
+      if (!profile.opsLeadId) {
+        profile.opsLeadId = bm.opsLeadId;
+        await profile.save();
+      } else if (profile.opsLeadId.toString() !== bm.opsLeadId.toString()) {
         return res.status(403).json({ error: 'That profile is not on your Ops team' });
       }
       report.profileId = profile._id;

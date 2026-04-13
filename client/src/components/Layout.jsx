@@ -5,8 +5,10 @@ export default function Layout({ user, onLogout, children }) {
 
   const nav = [
     { path: '/profile', label: 'Profile' },
-    { path: '/company-org', label: 'Company Org' },
-    { path: '/payment-history', label: 'Payment history' },
+    user.role !== 'client' && { path: '/company-org', label: 'Company Org' },
+    user.role !== 'client' && { path: '/payment-history', label: 'Payment history' },
+    user.role === 'client' && { path: '/client', label: 'My profiles' },
+    user.role === 'client' && { path: '/client/payout-approvals', label: 'Payout approvals' },
     user.role === 'bid_manager' && { path: '/bid-manager', label: 'My Reports' },
     user.role === 'bidder' && { path: '/bidder', label: 'My Work' },
     user.role === 'ops_lead' && { path: '/ops-lead/assignments', label: 'Assignments' },

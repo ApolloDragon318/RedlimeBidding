@@ -1593,6 +1593,25 @@
   border-radius: 0;
 }
 
+.profile-approval-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.35rem 0;
+  font-size: 0.85rem;
+}
+
+.profile-approval-tax {
+  opacity: 0.85;
+}
+
+.profile-approval-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+}
+
 /* ── Team breakdown inside payout request ── */
 .pr-team-breakdown {
   padding: 0.5rem 0.75rem 0.75rem;

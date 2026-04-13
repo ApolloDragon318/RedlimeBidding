@@ -7,7 +7,8 @@ const ROLE_ENUM = [
   'bid_manager',
   'ops_lead',
   'admin',
-  'financial_manager'
+  'financial_manager',
+  'client'
 ];
 
 const STATUS_ENUM = ['pending_onboarding', 'pending_ops', 'pending_admin', 'approved', 'rejected'];

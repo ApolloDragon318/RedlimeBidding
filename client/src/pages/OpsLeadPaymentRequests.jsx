@@ -154,15 +154,7 @@ export default function OpsLeadPaymentRequests() {
       {payoutMe?.pending && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <p className="payout-pending-note">
-            {payoutMe.pending.status === 'confirmed' ? (
-              <>
-                Your payment request is <strong>approved</strong>. Admin or Financial can record payment from their <strong>Payouts</strong> queue.
-              </>
-            ) : (
-              <>
-                Your request is <strong>waiting for Admin/Financial to confirm</strong>. They must confirm it in <strong>Payout requests</strong> before they can pay you.
-              </>
-            )}
+            Your payment notification is <strong>on file</strong>. Admin or Financial pays from their <strong>Payouts</strong> queue when per-profile approvals are complete (client or admin/FM when the profile has a client).
           </p>
         </div>
       )}
