@@ -41,7 +41,9 @@ export default function ProfilePayoutApprovalsCard({ onUpdated }) {
   return (
     <div className="profile-approvals-list">
       {approvals.length === 0 ? (
-        <p className="payout-requests-empty">No profiles awaiting payout approval.</p>
+        <p className="payout-requests-empty">
+          No open profile payout approvals. When all confirmed work has been fully paid out (bidder, bid manager, and Ops), this list stays empty — in line with an empty Payouts tree after everyone is paid.
+        </p>
       ) : (
         approvals.map(a => {
           const name = a.profileId?.name || 'Profile'

@@ -521,9 +521,9 @@ export default function AdminDashboard() {
                       </li>
                     ))}
                   </ul>
-                )}
-              </div>
-            )}
+          )}
+        </div>
+      )}
             {walletChangeRequests.length === 0 ? (
               <p className="payout-requests-empty">No pending wallet change requests.</p>
             ) : (
@@ -549,22 +549,22 @@ export default function AdminDashboard() {
                           disabled={walletProcessingId === wr._id}
                         >
                           {walletProcessingId === wr._id ? '…' : 'Approve'}
-                        </button>
+                </button>
                         <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => { setWalletDeclineModal(wr); setWalletDeclineReason('') }}>
                           Decline
-                        </button>
-                      </div>
+                </button>
+              </div>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+          )}
+        </div>
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="card-header">
               <h3>Profile payout approvals</h3>
               <span className="card-subtitle">
-                When a profile belongs to a client, either the client or admin/financial can approve it; internal profiles need admin/FM only. Tax estimates are for internal use only.
+                When a profile belongs to a client, either the client or admin/financial can approve it; internal profiles need admin/FM only. This list only includes profiles that still have unpaid payout. When every payout leg is paid, it clears — same as when the Payouts tree is empty after all payments. Tax estimates are internal.
               </span>
             </div>
             <ProfilePayoutApprovalsCard onUpdated={fetchPayoutQueue} />
@@ -677,7 +677,7 @@ export default function AdminDashboard() {
           {clientMgmtLoading ? (
             <div className="page-loading"><div className="spinner" /></div>
           ) : clientMgmtList.length === 0 ? (
-            <div className="card">
+        <div className="card">
               <div className="empty-state-box">
                 <span className="empty-state-icon">👥</span>
                 <p>No clients yet</p>
@@ -688,17 +688,17 @@ export default function AdminDashboard() {
               <div className="card-header">
                 <h3>All clients ({clientMgmtList.length})</h3>
               </div>
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
                       <th>Type</th>
                       <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                  </tr>
+                </thead>
+                <tbody>
                     {clientMgmtList.map(c => (
                       <tr key={c._id}>
                         {clientEditId === c._id ? (
@@ -720,7 +720,7 @@ export default function AdminDashboard() {
                                   style={{ width: '45%' }}
                                 />
                               </div>
-                            </td>
+                      </td>
                             <td>
                               <input
                                 value={clientEditForm.email}
@@ -771,12 +771,12 @@ export default function AdminDashboard() {
                             </td>
                           </>
                         )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+        </div>
           )}
         </>
       )}
@@ -787,7 +787,7 @@ export default function AdminDashboard() {
       {activeTab === 'pw-resets' && (
         <>
           {passwordResetRequests.length === 0 ? (
-            <div className="card">
+        <div className="card">
               <div className="empty-state-box">
                 <span className="empty-state-icon">🔑</span>
                 <p>No pending password reset requests</p>
@@ -829,8 +829,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
+        </div>
           )}
         </>
       )}
@@ -839,7 +839,7 @@ export default function AdminDashboard() {
       {activeTab === 'levels' && (
         <>
           {levelRequests.length === 0 ? (
-            <div className="card">
+        <div className="card">
               <div className="empty-state-box">
                 <span className="empty-state-icon">↑</span>
                 <p>No pending level requests</p>
@@ -915,7 +915,7 @@ export default function AdminDashboard() {
                     <strong>{formatLevel(lvlDeclineModal.currentLevel)}</strong> to{' '}
                     <strong>{formatLevel(lvlDeclineModal.newLevel)}</strong>.
                   </p>
-                  <div className="form-row">
+                    <div className="form-row">
                     <label>Reason (optional)</label>
                     <textarea
                       rows={3}
@@ -924,8 +924,8 @@ export default function AdminDashboard() {
                       onChange={e => setLvlDeclineReason(e.target.value)}
                       disabled={!!lvlProcessing}
                       className="lvl-modal-textarea"
-                    />
-                  </div>
+                      />
+                    </div>
                   <div className="modal-actions">
                     <button
                       type="button"
@@ -1101,13 +1101,13 @@ export default function AdminDashboard() {
                                   </li>
                                 ))}
                               </ul>
-                            </div>
-                          )}
+            </div>
+          )}
                           <div className="pending-detail-grid">
                             <div className="pending-detail-cell">
                               <span className="pending-detail-label">Legal name</span>
                               <span>{[u.legalFirstName, u.legalMiddleName, u.legalLastName].filter(Boolean).join(' ') || '—'}</span>
-                            </div>
+        </div>
                             <div className="pending-detail-cell">
                               <span className="pending-detail-label">Phone</span>
                               <span>{u.phone || '—'}</span>
@@ -1162,7 +1162,7 @@ export default function AdminDashboard() {
                           <div className="pending-item-actions">
                             <button type="button" onClick={() => handleApprove(u._id)} className="btn btn-primary btn-sm">Approve</button>
                             <button type="button" onClick={() => openRejectModal(u)} className="btn btn-ghost btn-sm btn-danger">Reject</button>
-                          </div>
+            </div>
                         </div>
                       )}
                     </div>
@@ -1294,12 +1294,12 @@ export default function AdminDashboard() {
           {personPayouts.length === 0 ? (
             <p className="empty-state">No person payouts yet.</p>
           ) : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
                   <tr><th>Date</th><th>Name</th><th>Role</th><th>Base</th><th>Bonus</th><th>Gross</th><th>Tax</th><th>Net</th><th>TxID</th></tr>
-                </thead>
-                <tbody>
+                    </thead>
+                    <tbody>
                   {personPayouts.map(h => (
                     <tr key={h._id}>
                       <td>{new Date(h.createdAt).toLocaleDateString()}</td>
@@ -1311,17 +1311,17 @@ export default function AdminDashboard() {
                       <td className="text-muted">−${Number(h.taxAmount ?? 0).toFixed(2)}</td>
                       <td><strong>${Number(h.netPay ?? h.totalPay).toFixed(2)}</strong></td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: '180px', wordBreak: 'break-all' }}>{h.txId || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           {legacyBatchPayouts.length > 0 && (
             <div style={{ marginTop: '2rem' }}>
               <div className="card-header">
                 <h3>Legacy batch payouts</h3>
-              </div>
+            </div>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -1338,7 +1338,7 @@ export default function AdminDashboard() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+          </div>
             </div>
           )}
         </div>
@@ -1386,13 +1386,13 @@ export default function AdminDashboard() {
                   disabled={walletDeclining}
                   className="lvl-modal-textarea"
                 />
-              </div>
+                  </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-danger" disabled={walletDeclining} onClick={confirmWalletDecline}>
                   {walletDeclining ? 'Declining…' : 'Decline request'}
-                </button>
+                      </button>
                 <button type="button" className="btn btn-ghost" onClick={() => setWalletDeclineModal(null)} disabled={walletDeclining}>Cancel</button>
-              </div>
+                    </div>
             </div>
           </div>
         </div>

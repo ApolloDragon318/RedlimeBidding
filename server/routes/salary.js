@@ -47,6 +47,15 @@ const PENDING_ANY_ROLE_UNPAID = [
   { opsLeadPayoutPaidAt: null }
 ];
 
+/** Profile ids that still have at least one confirmed report with any payout leg unpaid — same basis as payout queue / “all paid out”. */
+async function getUnpaidProfileIds() {
+  const pendingReports = await Report.find({
+    workflowStatus: WORKFLOW.CONFIRMED,
+    $or: PENDING_ANY_ROLE_UNPAID
+  }).select('profileId').lean();
+  return [...new Set(pendingReports.map(r => r.profileId).filter(Boolean))];
+}
+
 async function filterReportsByProfileApproval(reports) {
   if (!reports.length) return [];
   const profileIds = [...new Set(reports.map(r => r.profileId).filter(Boolean))];
@@ -304,7 +313,10 @@ async function syncProfilePayoutApprovals() {
     const sig = sorted.map(r => String(r._id)).join(',');
     const first = sorted[0];
     const bm = await User.findById(first.bidManagerId).select('opsLeadId').lean();
-    if (!bm?.opsLeadId) continue;
+    if (!bm?.opsLeadId) {
+      await ProfilePayoutApproval.deleteMany({ profileId: new mongoose.Types.ObjectId(pidStr) });
+      continue;
+    }
     const sums = byProfile.get(pidStr) || { clientSum: 0, workerSum: 0 };
     let doc = await ProfilePayoutApproval.findOne({ profileId: pidStr });
     if (!doc) {
@@ -837,13 +849,16 @@ router.get('/payout-request/me', authenticate, requireRole('bidder', 'bid_manage
 router.get('/profile-payout-approvals', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
     await syncProfilePayoutApprovals();
-    const list = await ProfilePayoutApproval.find({})
-      .populate('profileId', 'name clientId')
-      .populate('opsLeadId', 'name email')
-      .populate('clientApprovedBy', 'name email')
-      .populate('adminApprovedBy', 'name email')
-      .sort({ updatedAt: -1 })
-      .lean();
+    const profileIdsWithUnpaid = await getUnpaidProfileIds();
+    const list = profileIdsWithUnpaid.length === 0
+      ? []
+      : await ProfilePayoutApproval.find({ profileId: { $in: profileIdsWithUnpaid } })
+        .populate('profileId', 'name clientId')
+        .populate('opsLeadId', 'name email')
+        .populate('clientApprovedBy', 'name email')
+        .populate('adminApprovedBy', 'name email')
+        .sort({ updatedAt: -1 })
+        .lean();
     const approvals = list.map(a => {
       const wg = Number(a.workerGrossTotal) || 0;
       const { tax, net } = applyTax(wg);
@@ -866,8 +881,12 @@ router.get('/profile-payout-approvals/me', authenticate, requireRole('client'), 
     const clientDoc = await Client.findOne({ userId: req.user._id });
     if (!clientDoc) return res.json({ approvals: [] });
     const profiles = await ImProfile.find({ clientId: clientDoc._id }).select('_id').lean();
-    const pids = profiles.map(p => p._id);
-    const list = await ProfilePayoutApproval.find({ profileId: { $in: pids } })
+    const unpaidProfileIds = await getUnpaidProfileIds();
+    const unpaidSet = new Set(unpaidProfileIds.map(id => String(id)));
+    const pids = profiles.map(p => p._id).filter(pid => unpaidSet.has(String(pid)));
+    const list = pids.length === 0
+      ? []
+      : await ProfilePayoutApproval.find({ profileId: { $in: pids } })
       .populate('profileId', 'name')
       .populate('opsLeadId', 'name')
       .sort({ updatedAt: -1 })

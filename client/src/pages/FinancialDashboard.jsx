@@ -231,7 +231,7 @@ export default function FinancialDashboard() {
             <div className="card-header">
               <h3>Profile payout approvals</h3>
               <span className="card-subtitle">
-                When a profile has a client, either the client or admin/financial can approve; otherwise admin/FM only. Tax estimates are internal.
+                When a profile has a client, either the client or admin/financial can approve; otherwise admin/FM only. Only profiles with unpaid confirmed work appear here; when all payouts are recorded, this clears along with an empty Payouts tree. Tax estimates are internal.
               </span>
             </div>
             <ProfilePayoutApprovalsCard onUpdated={loadQueueAndHistory} />
