@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api'
 import PayoutTree from '../components/PayoutTree'
-import PayConfirmModal from '../components/PayConfirmModal'
 import SalaryRateGrid from '../components/SalaryRateGrid'
 import ClientPayoutTable from '../components/ClientPayoutTable'
 import ProfilePayoutApprovalsCard from '../components/ProfilePayoutApprovalsCard'
@@ -12,9 +11,7 @@ export default function FinancialDashboard() {
   const [tab, setTab] = useState('queue')
   const [loading, setLoading] = useState(true)
   const [adminBonusByUser, setAdminBonusByUser] = useState({})
-  const [payConfirm, setPayConfirm] = useState(null)
-  const [payTxId, setPayTxId] = useState('')
-  const [paying, setPaying] = useState(false)
+  const [markingPaid, setMarkingPaid] = useState(false)
   const [taxRate, setTaxRate] = useState(0.10)
   const [salaryGrid, setSalaryGrid] = useState({})
   const [salaryRoles, setSalaryRoles] = useState([])
@@ -118,22 +115,16 @@ export default function FinancialDashboard() {
     }
   }
 
-  const confirmPersonPay = async () => {
-    if (!payConfirm) return
-    const tx = payTxId.trim()
-    if (!tx) { alert('Enter the TxID (transaction reference) for this payment.'); return }
-    setPaying(true)
+  const markAllPaid = async () => {
+    if (!window.confirm('Did you pay all members correctly?')) return
+    setMarkingPaid(true)
     try {
-      const rawB = Number(adminBonusByUser[String(payConfirm.userId)])
-      const bonus = Number.isFinite(rawB) ? rawB : 0
-      await api.post(`/salary/pay/${payConfirm.userId}`, { adminBonus: bonus, txId: tx })
-      setPayConfirm(null)
-      setPayTxId('')
+      await api.post('/salary/mark-all-paid')
       await loadQueueAndHistory()
     } catch (err) {
-      alert(err.response?.data?.error || 'Payment failed')
+      alert(err.response?.data?.error || 'Failed to mark as paid')
     } finally {
-      setPaying(false)
+      setMarkingPaid(false)
     }
   }
 
@@ -240,13 +231,22 @@ export default function FinancialDashboard() {
             <div className="card-header">
               <h3>Payouts</h3>
               <button type="button" className="btn btn-ghost btn-sm" onClick={loadQueueAndHistory}>Refresh</button>
-              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Pay when each profile is approved (client or admin/FM when applicable). Amounts exclude profiles still pending approval.</span>
+              {tree.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={markingPaid}
+                  onClick={markAllPaid}
+                >
+                  {markingPaid ? 'Processing...' : 'Paid'}
+                </button>
+              )}
+              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Amounts exclude profiles still pending approval.</span>
             </div>
             <PayoutTree
               tree={tree}
               bonusByUser={adminBonusByUser}
               setBonusByUser={setAdminBonusByUser}
-              onPay={user => setPayConfirm(user)}
               onRefresh={loadQueueAndHistory}
               taxRate={taxRate}
             />
@@ -316,17 +316,6 @@ export default function FinancialDashboard() {
           )}
         </div>
       )}
-
-      <PayConfirmModal
-        payConfirm={payConfirm}
-        adminBonus={adminBonusByUser[String(payConfirm?.userId)] || 0}
-        payTxId={payTxId}
-        setPayTxId={setPayTxId}
-        paying={paying}
-        onConfirm={confirmPersonPay}
-        onCancel={() => { setPayConfirm(null); setPayTxId('') }}
-        taxRate={taxRate}
-      />
 
       {walletDeclineModal && (
         <div className="modal-overlay" onClick={() => !walletDeclining && setWalletDeclineModal(null)}>

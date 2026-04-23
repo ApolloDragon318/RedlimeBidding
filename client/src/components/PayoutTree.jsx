@@ -1,15 +1,12 @@
 import { useState } from 'react'
 
-function PayRow({ user, bonusByUser, setBonusByUser, onPay, taxRate = 0.10, indent = 0 }) {
+function PayRow({ user, bonusByUser, setBonusByUser, taxRate = 0.10, indent = 0 }) {
   const key = String(user.userId)
   const raw = bonusByUser[key]
   const bonus = raw === undefined || raw === '' ? 0 : Number(raw)
   const total = (Number(user.basePay) || 0) + (Number.isNaN(bonus) ? 0 : bonus)
   const tax = +(total * taxRate).toFixed(2)
   const net = +(total - tax).toFixed(2)
-
-  const isOpsLead = user.role === 'ops_lead'
-  const opsPayHidden = isOpsLead && !user.allTeamPaid
 
   return (
     <div className={`payout-node payout-depth-${indent}`}>
@@ -52,19 +49,6 @@ function PayRow({ user, bonusByUser, setBonusByUser, onPay, taxRate = 0.10, inde
             <span className="payout-label">Net</span>
             <span className="payout-value payout-total">${net.toFixed(2)}</span>
           </div>
-          {opsPayHidden ? (
-            <span className="payout-waiting-team">Pay all team members first</span>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={!user.address}
-              title={!user.address ? 'User has no wallet on file' : undefined}
-              onClick={() => onPay(user)}
-            >
-              Pay
-            </button>
-          )}
           {user.address && (
             <span className="payout-wallet">{user.address}</span>
           )}
@@ -81,7 +65,6 @@ export default function PayoutTree({
   tree,
   bonusByUser,
   setBonusByUser,
-  onPay,
   onRefresh,
   taxRate = 0.10
 }) {
@@ -113,7 +96,6 @@ export default function PayoutTree({
                 user={ops}
                 bonusByUser={bonusByUser}
                 setBonusByUser={setBonusByUser}
-                onPay={onPay}
                 taxRate={taxRate}
                 indent={0}
               />
@@ -130,7 +112,6 @@ export default function PayoutTree({
                         user={bm}
                         bonusByUser={bonusByUser}
                         setBonusByUser={setBonusByUser}
-                        onPay={onPay}
                         taxRate={taxRate}
                         indent={1}
                       />
@@ -140,7 +121,6 @@ export default function PayoutTree({
                             user={bidder}
                             bonusByUser={bonusByUser}
                             setBonusByUser={setBonusByUser}
-                            onPay={onPay}
                             taxRate={taxRate}
                             indent={2}
                           />

@@ -959,6 +959,20 @@ router.post('/profile-payout-approvals/:id/client-approve', authenticate, requir
   }
 });
 
+router.post('/mark-all-paid', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
+  try {
+    await Report.deleteMany({});
+    await PayoutRequest.updateMany(
+      { status: { $in: ['pending', 'confirmed'] } },
+      { $set: { status: 'fulfilled', fulfilledAt: new Date() } }
+    );
+    await ProfilePayoutApproval.deleteMany({});
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/profile-payout-approvals/:id/admin-approve', authenticate, requireRole('admin', 'financial_manager'), async (req, res) => {
   try {
     await syncProfilePayoutApprovals();

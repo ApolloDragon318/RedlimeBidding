@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api'
 import PayoutTree from '../components/PayoutTree'
-import PayConfirmModal from '../components/PayConfirmModal'
 import SalaryRateGrid from '../components/SalaryRateGrid'
 import ClientPayoutTable from '../components/ClientPayoutTable'
 import ProfilePayoutApprovalsCard from '../components/ProfilePayoutApprovalsCard'
@@ -35,9 +34,7 @@ export default function AdminDashboard() {
   const [payoutTree, setPayoutTree] = useState([])
   const [payoutTaxRate, setPayoutTaxRate] = useState(0.10)
   const [adminBonusByUser, setAdminBonusByUser] = useState({})
-  const [payConfirm, setPayConfirm] = useState(null)
-  const [payTxId, setPayTxId] = useState('')
-  const [paying, setPaying] = useState(false)
+  const [markingPaid, setMarkingPaid] = useState(false)
   const [adminAssign, setAdminAssign] = useState({})
   const [nameSearch, setNameSearch] = useState('')
   const [nameResults, setNameResults] = useState([])
@@ -387,25 +384,19 @@ export default function AdminDashboard() {
     }
   }
 
-  const confirmPersonPay = async () => {
-    if (!payConfirm) return
-    const tx = payTxId.trim()
-    if (!tx) { alert('Enter the TxID (transaction reference) for this payment.'); return }
-    setPaying(true)
+  const markAllPaid = async () => {
+    if (!window.confirm('Did you pay all members correctly?')) return
+    setMarkingPaid(true)
     try {
-      const rawB = Number(adminBonusByUser[String(payConfirm.userId)])
-      const bonus = Number.isFinite(rawB) ? rawB : 0
-      await api.post(`/salary/pay/${payConfirm.userId}`, { adminBonus: bonus, txId: tx })
-      setPayConfirm(null)
-      setPayTxId('')
+      await api.post('/salary/mark-all-paid')
       await fetchPayoutQueue()
       const historyRes = await api.get('/salary/history')
       setPersonPayouts(historyRes.data?.personPayouts || [])
       setLegacyBatchPayouts(historyRes.data?.legacyBatchPayouts || [])
     } catch (err) {
-      alert(err.response?.data?.error || 'Payment failed')
+      alert(err.response?.data?.error || 'Failed to mark as paid')
     } finally {
-      setPaying(false)
+      setMarkingPaid(false)
     }
   }
 
@@ -573,13 +564,22 @@ export default function AdminDashboard() {
             <div className="card-header">
               <h3>Payouts</h3>
               <button type="button" className="btn btn-ghost btn-sm" onClick={fetchPayoutQueue}>Refresh</button>
-              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Pay team members once per-profile approval is in place. Amounts only include approved profiles.</span>
+              {payoutTree.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={markingPaid}
+                  onClick={markAllPaid}
+                >
+                  {markingPaid ? 'Processing...' : 'Paid'}
+                </button>
+              )}
+              <span className="card-subtitle" style={{ flex: '1 1 100%' }}>Amounts only include approved profiles.</span>
             </div>
             <PayoutTree
               tree={payoutTree}
               bonusByUser={adminBonusByUser}
               setBonusByUser={setAdminBonusByUser}
-              onPay={user => setPayConfirm(user)}
               onRefresh={fetchPayoutQueue}
               taxRate={payoutTaxRate}
             />
@@ -1353,17 +1353,6 @@ export default function AdminDashboard() {
           onUpdate={handleSalaryUpdate}
         />
       )}
-
-      <PayConfirmModal
-        payConfirm={payConfirm}
-        adminBonus={adminBonusByUser[String(payConfirm?.userId)] || 0}
-        payTxId={payTxId}
-        setPayTxId={setPayTxId}
-        paying={paying}
-        onConfirm={confirmPersonPay}
-        onCancel={() => { setPayConfirm(null); setPayTxId('') }}
-        taxRate={payoutTaxRate}
-      />
 
       {walletDeclineModal && (
         <div className="modal-overlay" onClick={() => !walletDeclining && setWalletDeclineModal(null)}>
